@@ -1,0 +1,71 @@
+// NexusCRM 全局样式
+// variables.scss 已通过 vite.config.js 的 additionalData 自动注入
+
+// 全局重置
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', Arial, sans-serif;
+  font-size: $font-size-base;
+  color: $text-primary;
+  background-color: $bg-page;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}
+
+a {
+  color: $brand-color;
+  text-decoration: none;
+
+  &:hover {
+    color: $brand-color-light;
+  }
+}
+
+// 页面通用卡片样式
+.page-card {
+  background: $bg-white;
+  border-radius: $border-radius-medium;
+  padding: $spacing-xl;
+  box-shadow: $box-shadow-light;
+
+  & + .page-card {
+    margin-top: $spacing-lg;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: $spacing-xl;
+    padding-bottom: $spacing-lg;
+    border-bottom: 1px solid $border-lighter;
+
+    .title {
+      font-size: $font-size-medium;
+      font-weight: 600;
+      color: $text-primary;
+    }
+  }
+
+  &__body {
+    // 内容区域
+  }
+}
