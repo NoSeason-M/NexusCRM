@@ -2,31 +2,38 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores'
-import { menuItems } from '@/router/menu'
+import { useUserStore } from '@/stores/user'
+import { storeToRefs } from 'pinia'
 import {
   Odometer,
-  Document
+  User,
+  TrendCharts,
+  Document,
+  Ticket,
+  Setting
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const userStore = useUserStore()
 
+const { menus } = storeToRefs(userStore)
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 
 const iconMap = {
   Odometer,
-  Document
+  User,
+  TrendCharts,
+  Document,
+  Ticket,
+  Setting
 }
 
 function handleMenuClick(item) {
   if (!item.disabled && item.path) {
     router.push(item.path)
   }
-}
-
-function isActive(path) {
-  return route.path === path
 }
 </script>
 
@@ -38,7 +45,7 @@ function isActive(path) {
       <span class="logo-short" v-else>NC</span>
     </div>
 
-    <!-- 菜单列表 -->
+    <!-- 动态菜单列表 -->
     <el-menu
       :default-active="route.path"
       :collapse="isCollapsed"
@@ -49,7 +56,7 @@ function isActive(path) {
       class="sidebar-menu"
     >
       <el-menu-item
-        v-for="item in menuItems"
+        v-for="item in menus"
         :key="item.path"
         :index="item.path"
         :disabled="item.disabled"
@@ -59,7 +66,7 @@ function isActive(path) {
           <component :is="iconMap[item.icon]" />
         </el-icon>
         <template #title>
-          <span>{{ item.label }}</span>
+          <span>{{ item.title }}</span>
         </template>
       </el-menu-item>
     </el-menu>

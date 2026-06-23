@@ -1,4 +1,4 @@
-import { generateUsers } from './seed'
+import { generateUsers, generateProfiles, PRESET_ACCOUNTS } from './seed'
 
 const STORAGE_KEY = 'nexus-crm-mock-data'
 
@@ -29,6 +29,11 @@ function save(data) {
  */
 function reset() {
   const data = {
+    // 预设账号（用于登录验证）
+    accounts: PRESET_ACCOUNTS,
+    // 用户档案数据
+    profiles: generateProfiles(),
+    // 随机用户（旧数据兼容，后续可移除）
     users: generateUsers(5)
   }
   save(data)
@@ -36,12 +41,13 @@ function reset() {
 }
 
 // 启动时自动初始化
-const store = load() || reset()
+let store = load() || reset()
 
 export function getStore() {
   return store
 }
 
 export function resetStore() {
-  return reset()
+  store = reset()
+  return store
 }
