@@ -3,13 +3,17 @@ import { generateUsers, generateProfiles, PRESET_ACCOUNTS } from './seed'
 const STORAGE_KEY = 'nexus-crm-mock-data'
 
 /**
- * 从 localStorage 加载数据，不存在则生成种子数据
+ * 从 localStorage 加载数据，不存在或不完整则返回 null（触发 reset）
  */
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      return JSON.parse(raw)
+      const data = JSON.parse(raw)
+      // 校验必需字段，防止旧版本数据格式不完整导致报错
+      if (data && Array.isArray(data.accounts) && Array.isArray(data.profiles)) {
+        return data
+      }
     }
   } catch {
     // ignore
