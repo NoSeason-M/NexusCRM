@@ -1,6 +1,20 @@
-import { generateUsers, generateProfiles, PRESET_ACCOUNTS } from './seed'
+import {
+  PRESET_ACCOUNTS,
+  generateUsers,
+  generateProfiles,
+  generateCustomers,
+  generateOpportunities,
+  generateContracts,
+  generateTickets,
+  generateDocuments,
+  generateTodos,
+  generateRecentFollows
+} from './seed'
 
 const STORAGE_KEY = 'nexus-crm-mock-data'
+
+/** 数据版本号，用于增量迁移 */
+export const DATABASE_VERSION = 2
 
 /**
  * 从 localStorage 加载数据，不存在或不完整则返回 null（触发 reset）
@@ -11,7 +25,7 @@ function load() {
     if (raw) {
       const data = JSON.parse(raw)
       // 校验必需字段，防止旧版本数据格式不完整导致报错
-      if (data && Array.isArray(data.accounts) && Array.isArray(data.profiles)) {
+      if (data && data.version === DATABASE_VERSION && Array.isArray(data.accounts) && Array.isArray(data.profiles)) {
         return data
       }
     }
@@ -32,13 +46,33 @@ function save(data) {
  * 初始化 / 重置数据
  */
 function reset() {
+  const profiles = generateProfiles()
+  const users = generateUsers(5)
+  const customers = generateCustomers(profiles)
+  const opportunities = generateOpportunities(customers, profiles)
+  const contracts = generateContracts(customers, opportunities)
+  const tickets = generateTickets(customers, profiles)
+  const documents = generateDocuments(profiles)
+
+  const todos = generateTodos(customers, profiles)
+  const recentFollows = generateRecentFollows(customers, profiles)
+
   const data = {
+    version: DATABASE_VERSION,
     // 预设账号（用于登录验证）
     accounts: PRESET_ACCOUNTS,
     // 用户档案数据
-    profiles: generateProfiles(),
-    // 随机用户（旧数据兼容，后续可移除）
-    users: generateUsers(5)
+    profiles,
+    // 随机用户（旧数据兼容）
+    users,
+    // 业务数据
+    customers,
+    opportunities,
+    contracts,
+    tickets,
+    documents,
+    todos,
+    recentFollows
   }
   save(data)
   return data

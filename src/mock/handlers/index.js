@@ -1,6 +1,12 @@
 import { http, HttpResponse } from 'msw'
 import { getStore, resetStore } from '../database/store'
 import { ROLE_MENUS, ROLE_PERMISSIONS } from '../database/seed'
+import {
+  createDashboardSummary,
+  createSalesFunnel,
+  createContractTrend,
+  createTicketStatusDistribution
+} from '../database/dashboard'
 
 /**
  * 统一响应格式
@@ -35,6 +41,17 @@ function resolveUser(authHeader) {
   } catch {
     return null
   }
+}
+
+/**
+ * 工具函数：为客户 id 和用户 id 补充名称
+ */
+function resolveNames(store) {
+  const customerMap = {}
+  store.customers.forEach(c => { customerMap[c.id] = c.name })
+  const userMap = {}
+  store.profiles.forEach(p => { userMap[p.id] = p.name })
+  return { customerMap, userMap }
 }
 
 export const handlers = [
@@ -131,5 +148,266 @@ export const handlers = [
     }
     const permissions = ROLE_PERMISSIONS[user.role] || []
     return success(permissions)
+  }),
+
+  // ──── Dashboard 接口 ────
+
+  // GET /api/dashboard/summary — 工作台概览指标
+  http.get('/api/dashboard/summary', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+
+    const url = new URL(request.url)
+    const scenario = url.searchParams.get('scenario')
+
+    if (scenario === 'error') {
+      return fail('模拟服务器错误', -1, 500)
+    }
+
+    const store = getStore()
+
+    if (scenario === 'empty') {
+      return success({
+        customerCount: 0,
+        activeCustomerCount: 0,
+        activeOpportunityCount: 0,
+        opportunityAmount: 0,
+        contractAmount: 0,
+        pendingTicketCount: 0
+      })
+    }
+
+    const summary = createDashboardSummary(store)
+    const funnel = createSalesFunnel(store)
+    const contractTrend = createContractTrend(store)
+    const ticketStatus = createTicketStatusDistribution(store)
+
+    return success({ ...summary, funnel, contractTrend, ticketStatus })
+  }),
+
+  // ──── 图表数据接口 ────
+
+  // GET /api/dashboard/charts/sales-funnel — 销售漏斗
+  http.get('/api/dashboard/charts/sales-funnel', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const url = new URL(request.url)
+    const scenario = url.searchParams.get('scenario')
+
+    if (scenario === 'error') return fail('模拟服务器错误', -1, 500)
+
+    const store = getStore()
+    let data = createSalesFunnel(store)
+
+    if (scenario === 'empty') data = []
+    if (scenario === 'partial') {
+      data = data.map(d => ({
+        ...d,
+        count: d.stage === 'closed_lost' ? 0 : d.count,
+        amount: d.stage === 'closed_lost' ? 0 : d.amount
+      }))
+    }
+
+    return success(data)
+  }),
+
+  // GET /api/dashboard/charts/contract-trend — 合同签约趋势
+  http.get('/api/dashboard/charts/contract-trend', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const url = new URL(request.url)
+    const scenario = url.searchParams.get('scenario')
+
+    if (scenario === 'error') return fail('模拟服务器错误', -1, 500)
+
+    const store = getStore()
+    let data = createContractTrend(store)
+
+    if (scenario === 'empty') data = []
+    if (scenario === 'partial') {
+      // 只保留最近 3 个月的数据
+      data = data.slice(-3)
+    }
+
+    return success(data)
+  }),
+
+  // GET /api/dashboard/charts/ticket-status — 工单状态分布
+  http.get('/api/dashboard/charts/ticket-status', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const url = new URL(request.url)
+    const scenario = url.searchParams.get('scenario')
+
+    if (scenario === 'error') return fail('模拟服务器错误', -1, 500)
+
+    const store = getStore()
+    let data = createTicketStatusDistribution(store)
+
+    if (scenario === 'empty') data = []
+    if (scenario === 'partial') {
+      // 只保留前 3 项
+      data = data.slice(0, 3)
+    }
+
+    return success(data)
+  }),
+
+  // GET /api/dashboard/customers — 客户选项下拉列表
+  http.get('/api/dashboard/customers', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+
+    const store = getStore()
+    const options = store.customers.map(c => ({
+      id: c.id,
+      name: c.name,
+      status: c.status
+    }))
+
+    return success(options)
+  }),
+
+  // ──── 待办接口 ────
+
+  // GET /api/dashboard/todos — 获取待办列表
+  http.get('/api/dashboard/todos', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const { customerMap, userMap } = resolveNames(store)
+    const list = store.todos.map(t => ({
+      ...t,
+      customerName: customerMap[t.customerId] || '未知客户',
+      ownerName: userMap[t.ownerId] || '未知用户'
+    }))
+    return success(list)
+  }),
+
+  // POST /api/dashboard/todos — 新建待办
+  http.post('/api/dashboard/todos', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const body = await request.json()
+    const todo = {
+      id: crypto.randomUUID(),
+      title: body.title || '',
+      customerId: body.customerId || (store.customers[0]?.id || ''),
+      ownerId: user.id,
+      priority: body.priority || 'medium',
+      status: body.status || 'pending',
+      dueAt: body.dueAt || new Date(Date.now() + 86400000 * 3).toISOString(),
+      createdAt: new Date().toISOString()
+    }
+    store.todos.push(todo)
+    return success(todo)
+  }),
+
+  // PUT /api/dashboard/todos/:id — 更新待办
+  http.put('/api/dashboard/todos/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const idx = store.todos.findIndex(t => t.id === params.id)
+    if (idx === -1) return fail('待办不存在', 1005, 404)
+
+    // 非 admin 只能操作自己的待办
+    if (user.role !== 'admin' && store.todos[idx].ownerId !== user.id) {
+      return fail('没有权限修改他人的待办', 1006, 403)
+    }
+
+    const body = await request.json()
+    store.todos[idx] = { ...store.todos[idx], ...body, id: store.todos[idx].id, ownerId: store.todos[idx].ownerId }
+    return success(store.todos[idx])
+  }),
+
+  // DELETE /api/dashboard/todos/:id — 删除待办
+  http.delete('/api/dashboard/todos/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const idx = store.todos.findIndex(t => t.id === params.id)
+    if (idx === -1) return fail('待办不存在', 1005, 404)
+
+    // 非 admin 只能删除自己的待办
+    if (user.role !== 'admin' && store.todos[idx].ownerId !== user.id) {
+      return fail('没有权限删除他人的待办', 1006, 403)
+    }
+
+    store.todos.splice(idx, 1)
+    return success({ message: '已删除' })
+  }),
+
+  // GET /api/dashboard/recent-follows — 获取跟进记录列表
+  http.get('/api/dashboard/recent-follows', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const { customerMap, userMap } = resolveNames(store)
+    const list = store.recentFollows.map(f => ({
+      ...f,
+      customerName: customerMap[f.customerId] || '未知客户',
+      ownerName: userMap[f.ownerId] || '未知用户'
+    }))
+    return success(list)
+  }),
+
+  // POST /api/dashboard/recent-follows — 新建跟进记录
+  http.post('/api/dashboard/recent-follows', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const body = await request.json()
+    const follow = {
+      id: crypto.randomUUID(),
+      customerId: body.customerId || (store.customers[0]?.id || ''),
+      ownerId: user.id,
+      method: body.method || 'other',
+      content: body.content || '',
+      nextFollowAt: body.nextFollowAt || '',
+      createdAt: new Date().toISOString()
+    }
+    store.recentFollows.push(follow)
+    return success(follow)
+  }),
+
+  // PUT /api/dashboard/recent-follows/:id — 更新跟进记录
+  http.put('/api/dashboard/recent-follows/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    const store = getStore()
+    const idx = store.recentFollows.findIndex(f => f.id === params.id)
+    if (idx === -1) return fail('跟进记录不存在', 1005, 404)
+
+    // 非 admin 只能操作自己的记录
+    if (user.role !== 'admin' && store.recentFollows[idx].ownerId !== user.id) {
+      return fail('没有权限修改他人的跟进记录', 1006, 403)
+    }
+
+    const body = await request.json()
+    store.recentFollows[idx] = { ...store.recentFollows[idx], ...body, id: store.recentFollows[idx].id, ownerId: store.recentFollows[idx].ownerId }
+    return success(store.recentFollows[idx])
   })
 ]
