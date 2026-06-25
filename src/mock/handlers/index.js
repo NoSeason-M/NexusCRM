@@ -2,6 +2,14 @@ import { http, HttpResponse } from 'msw'
 import { getStore, resetStore } from '../database/store'
 import { ROLE_MENUS, ROLE_PERMISSIONS } from '../database/seed'
 import {
+  queryCustomers,
+  getCustomerOptions,
+  getCustomerDetail,
+  validateCustomerInput,
+  getCustomerDeleteConflict,
+  validateFollowRecordInput
+} from '../database/customers'
+import {
   createDashboardSummary,
   createSalesFunnel,
   createContractTrend,
@@ -409,5 +417,254 @@ export const handlers = [
     const body = await request.json()
     store.recentFollows[idx] = { ...store.recentFollows[idx], ...body, id: store.recentFollows[idx].id, ownerId: store.recentFollows[idx].ownerId }
     return success(store.recentFollows[idx])
+  }),
+
+  // ──── 客户管理接口 ────
+
+  // GET /api/customers — 组合查询 + 分页客户列表
+  http.get('/api/customers', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+    // 权限检查
+    if (!ROLE_PERMISSIONS[user.role]?.includes('customer:view') && !ROLE_PERMISSIONS[user.role]?.includes('*')) {
+      return fail('无权限查看客户', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = queryCustomers(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/customers/options — 获取客户筛选选项
+  http.get('/api/customers/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+
+    const store = getStore()
+    const options = getCustomerOptions(store)
+    return success(options)
+  }),
+
+  // GET /api/customers/:id — 获取客户详情
+  http.get('/api/customers/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) {
+      return fail('未登录或 Token 已过期', 1004, 401)
+    }
+
+    const store = getStore()
+    const detail = getCustomerDetail(store, params.id)
+    if (!detail) {
+      return fail('客户不存在', 1005, 404)
+    }
+    return success(detail)
+  }),
+
+  // POST /api/customers — 新建客户
+  http.post('/api/customers', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    // 权限检查：customer:create
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('customer:create') && !perms.includes('*')) {
+      return fail('无权限新建客户', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    // 参数校验
+    const { valid, errors, data } = validateCustomerInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    const customer = {
+      id: crypto.randomUUID(),
+      ...data,
+      // 未指定负责人时默认为当前用户
+      ownerId: data.ownerId || user.id,
+      // 新建时 lastFollowAt 为 null，但前端展示需兼容
+      lastFollowAt: null,
+      createdAt: now,
+      updatedAt: now
+    }
+    store.customers.unshift(customer)
+    return success(customer)
+  }),
+
+  // PUT /api/customers/:id — 更新客户
+  http.put('/api/customers/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    const store = getStore()
+    const idx = store.customers.findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('客户不存在', 1005, 404)
+
+    const existing = store.customers[idx]
+
+    // 权限检查：customer:edit 或 customer:assign
+    const hasEdit = perms.includes('customer:edit') || perms.includes('*')
+    // sales 只能编辑自己负责的客户
+    if (!hasEdit && user.role === 'sales' && existing.ownerId !== user.id) {
+      return fail('没有权限编辑他人的客户', 1006, 403)
+    }
+    if (!hasEdit && user.role !== 'sales') {
+      return fail('无权限编辑客户', 1006, 403)
+    }
+
+    const body = await request.json()
+
+    // ownerId 变更需要 customer:assign 权限
+    if (body.ownerId && body.ownerId !== existing.ownerId) {
+      const canAssign = perms.includes('customer:assign') || perms.includes('*')
+      if (!canAssign) {
+        return fail('没有权限转移客户负责人', 1006, 403)
+      }
+    }
+
+    // 参数校验（排除自身 ID）
+    const { valid, errors, data } = validateCustomerInput(store, { ...existing, ...body }, existing.id)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 禁止修改 createdAt / id / lastFollowAt
+    const now = new Date().toISOString()
+    store.customers[idx] = {
+      ...existing,
+      ...data,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      lastFollowAt: existing.lastFollowAt,
+      ownerId: body.ownerId || existing.ownerId,
+      updatedAt: now
+    }
+    return success(store.customers[idx])
+  }),
+
+  // DELETE /api/customers/:id — 删除客户
+  http.delete('/api/customers/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    const store = getStore()
+    const idx = store.customers.findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('客户不存在', 1005, 404)
+
+    // 权限检查：customer:delete
+    if (!perms.includes('customer:delete') && !perms.includes('*')) {
+      return fail('无权限删除客户', 1006, 403)
+    }
+    // sales 只能删除自己负责的客户
+    if (user.role === 'sales' && store.customers[idx].ownerId !== user.id) {
+      return fail('没有权限删除他人的客户', 1006, 403)
+    }
+
+    // 关联冲突检查
+    const conflict = getCustomerDeleteConflict(store, params.id)
+    if (conflict.hasConflict) {
+      const detail = conflict.conflicts.map(c => `${c.type}(${c.count})`).join('、')
+      return fail(`该客户存在关联数据（${detail}），无法删除`, 1009, 409)
+    }
+
+    store.customers.splice(idx, 1)
+    return success({ message: '客户已删除' })
+  }),
+
+  // ──── 客户跟进记录接口 ────
+
+  // POST /api/customers/:id/follows — 新增跟进记录
+  http.post('/api/customers/:id/follows', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('customer:follow') && !perms.includes('*')) {
+      return fail('没有权限跟进客户', 1006, 403)
+    }
+
+    const store = getStore()
+    const customer = store.customers.find(c => c.id === params.id)
+    if (!customer) return fail('客户不存在', 1005, 404)
+
+    const body = await request.json()
+
+    // 校验
+    const { valid, errors } = validateFollowRecordInput(body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, 1010, 400)
+    }
+
+    const now = new Date().toISOString()
+    const follow = {
+      id: crypto.randomUUID(),
+      customerId: params.id,
+      ownerId: user.id,
+      method: body.method,
+      content: body.content.trim(),
+      nextFollowAt: body.nextFollowAt || '',
+      createdAt: now
+    }
+
+    store.recentFollows.unshift(follow)
+
+    // 更新客户的 lastFollowAt
+    customer.lastFollowAt = now
+
+    return success(follow)
+  }),
+
+  // ──── 客户负责人变更接口 ────
+
+  // PUT /api/customers/:id/owner — 变更客户负责人
+  http.put('/api/customers/:id/owner', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('customer:assign') && !perms.includes('*')) {
+      return fail('没有权限分配客户负责人', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.customers.findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('客户不存在', 1005, 404)
+
+    const body = await request.json()
+    if (!body.ownerId) {
+      return fail('请选择新的负责人', 1011, 400)
+    }
+
+    // 校验负责人是否存在且活跃
+    const ownerProfile = store.profiles.find(p => p.id === body.ownerId && p.status !== 'inactive')
+    if (!ownerProfile) {
+      return fail('指定的负责人不存在或已停用', 1012, 400)
+    }
+
+    const now = new Date().toISOString()
+    store.customers[idx].ownerId = body.ownerId
+    store.customers[idx].updatedAt = now
+
+    return success({
+      id: store.customers[idx].id,
+      ownerId: store.customers[idx].ownerId,
+      ownerName: ownerProfile.name,
+      updatedAt: now
+    })
   })
 ]

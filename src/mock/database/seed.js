@@ -30,9 +30,9 @@ const ROLE_NAMES = {
  */
 export const ROLE_PERMISSIONS = {
   admin:   ['*'],
-  manager: ['dashboard:view', 'customer:view', 'customer:create', 'opportunity:view', 'opportunity:create', 'contract:view', 'contract:approve', 'ticket:view'],
-  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'opportunity:view', 'opportunity:create', 'contract:view'],
-  support: ['dashboard:view', 'customer:view', 'ticket:view', 'ticket:handle'],
+  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'contract:view', 'contract:approve', 'ticket:view'],
+  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'contract:view'],
+  support: ['dashboard:view', 'customer:view', 'customer:follow', 'ticket:view', 'ticket:handle'],
   viewer:  ['dashboard:view', 'customer:view']
 }
 
@@ -124,9 +124,29 @@ export function generateProfiles() {
 }
 
 /**
- * 客户状态
+ * 客户状态（含权重）
  */
-const CUSTOMER_STATUSES = ['active', 'active', 'active', 'inactive', 'lead']
+export const CUSTOMER_STATUSES = ['active', 'active', 'active', 'potential', 'inactive', 'at_risk', 'lead']
+
+/**
+ * 客户级别
+ */
+export const CUSTOMER_LEVELS = ['platinum', 'gold', 'silver', 'regular']
+
+/**
+ * 行业列表
+ */
+export const INDUSTRIES = ['互联网/IT', '金融/银行', '医疗健康', '教育培训', '制造业', '零售电商', '房地产', '物流运输', '能源环保', '文化传媒']
+
+/**
+ * 省份列表
+ */
+export const PROVINCES = ['北京市', '上海市', '广东省', '浙江省', '江苏省', '四川省', '湖北省', '山东省', '福建省', '河南省']
+
+/**
+ * 来源渠道
+ */
+export const SOURCES = ['官网注册', '线下展会', '客户推荐', '电话邀约', '在线广告', '合作伙伴']
 
 /**
  * 生成客户数据（30~40 条）
@@ -136,14 +156,43 @@ export function generateCustomers(profiles) {
   const count = faker.number.int({ min: 30, max: 40 })
   const customers = []
   for (let i = 0; i < count; i++) {
+    const createdAt = faker.date.between({ from: '2025-01-01', to: new Date() }).toISOString()
     customers.push({
       id: faker.string.uuid(),
       name: faker.company.name(),
-      phone: faker.phone.number(),
-      email: faker.internet.email(),
-      ownerId: pickUserId(profiles),
+      // 行业
+      industry: faker.helpers.arrayElement(INDUSTRIES),
+      // 客户级别
+      level: faker.helpers.arrayElement(CUSTOMER_LEVELS),
+      // 状态
       status: faker.helpers.arrayElement(CUSTOMER_STATUSES),
-      createdAt: faker.date.between({ from: '2025-01-01', to: new Date() }).toISOString()
+      // 负责人
+      ownerId: pickUserId(profiles),
+      // 地址
+      province: faker.helpers.arrayElement(PROVINCES),
+      city: faker.helpers.arrayElement(['东城区', '西城区', '朝阳区', '浦东新区', '天河区', '南山区', '西湖区', '高新区', '工业园区', '经开区']),
+      address: faker.location.streetAddress(),
+      // 来源
+      source: faker.helpers.arrayElement(SOURCES),
+      // 联系人
+      contactName: faker.person.fullName(),
+      contactPhone: faker.phone.number(),
+      contactTitle: faker.helpers.arrayElement(['CEO', 'CTO', '技术总监', '产品经理', '销售总监', '采购经理', '项目经理', '运营总监']),
+      contactEmail: faker.internet.email(),
+      // 描述
+      description: faker.helpers.arrayElement([
+        '长期合作客户，信任度高',
+        '新开发客户，需持续跟进',
+        '战略合作伙伴，深度绑定',
+        '重点维护客户，定期回访',
+        '高潜力客户，正在培育',
+        '行业标杆客户，有示范效应'
+      ]),
+      // 跟进信息
+      lastFollowAt: faker.date.between({ from: '2026-05-01', to: new Date() }).toISOString(),
+      // 时间戳
+      createdAt,
+      updatedAt: faker.date.between({ from: createdAt, to: new Date() }).toISOString()
     })
   }
   return customers
@@ -315,37 +364,71 @@ export function generateTodos(customers, profiles) {
 }
 
 /**
- * 跟进方式
+ * 跟进方式（与 PDF 任务3 保持一致）
  */
-const FOLLOW_METHODS = ['call', 'email', 'meeting', 'other']
+export const FOLLOW_METHODS = ['phone', 'visit', 'wechat', 'email']
 
 /**
- * 生成跟进记录数据（10 条）
+ * 跟进方式中文名映射
+ */
+export const FOLLOW_METHOD_LABELS = {
+  phone: '电话',
+  visit: '拜访',
+  wechat: '微信',
+  email: '邮件'
+}
+
+/**
+ * 跟进内容模板（按方法分类）
+ */
+const FOLLOW_CONTENT_BY_METHOD = {
+  phone: [
+    '电话沟通了项目需求细节，客户表示满意',
+    '电话确认了合同条款修改意见',
+    '电话回访客户使用情况，反馈良好',
+    '电话沟通了续约事宜，客户需考虑'
+  ],
+  visit: [
+    '上门拜访客户，面谈合作方案',
+    '拜访客户进行产品演示，反馈积极',
+    '客户现场交流，确认了实施时间表',
+    '拜访客户高层，推进战略合作'
+  ],
+  wechat: [
+    '微信沟通了项目进度，客户确认OK',
+    '微信发送了最新资料，客户已查收',
+    '微信回复了客户的技术问题',
+    '微信群沟通了多方协作方案'
+  ],
+  email: [
+    '发送了最新报价单，等待客户确认',
+    '邮件回复了客户的技术问题',
+    '发送了项目方案文档，客户正在审阅',
+    '邮件确认了会议纪要及下一步计划'
+  ]
+}
+
+/**
+ * 生成客户跟进记录（2~4 条/客户）
  * @param {Array} customers - 客户列表
  * @param {Array} profiles  - 用户档案列表
  */
 export function generateRecentFollows(customers, profiles) {
-  const count = 10
   const follows = []
-  for (let i = 0; i < count; i++) {
-    follows.push({
-      id: faker.string.uuid(),
-      customerId: faker.helpers.arrayElement(customers).id,
-      ownerId: pickUserId(profiles),
-      method: faker.helpers.arrayElement(FOLLOW_METHODS),
-      content: faker.helpers.arrayElement([
-        '沟通了项目需求细节，客户表示满意',
-        '发送了最新报价单，等待客户确认',
-        '安排了产品演示会议，客户反馈积极',
-        '电话沟通了合同条款修改意见',
-        '邮件回复了客户的技术问题',
-        '拜访客户面谈合作方案',
-        '确认了项目实施时间表',
-        '处理了客户反馈的系统问题'
-      ]),
-      nextFollowAt: faker.date.between({ from: new Date(), to: '2026-07-31' }).toISOString(),
-      createdAt: faker.date.between({ from: '2026-06-01', to: new Date() }).toISOString()
-    })
+  for (const customer of customers) {
+    const count = faker.number.int({ min: 2, max: 4 })
+    for (let i = 0; i < count; i++) {
+      const method = faker.helpers.arrayElement(FOLLOW_METHODS)
+      follows.push({
+        id: faker.string.uuid(),
+        customerId: customer.id,
+        ownerId: pickUserId(profiles),
+        method,
+        content: faker.helpers.arrayElement(FOLLOW_CONTENT_BY_METHOD[method]),
+        nextFollowAt: faker.date.between({ from: new Date(), to: '2026-07-31' }).toISOString(),
+        createdAt: faker.date.between({ from: customer.createdAt, to: new Date() }).toISOString()
+      })
+    }
   }
   return follows
 }

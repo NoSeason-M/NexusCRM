@@ -23,7 +23,13 @@ const routes = [
         path: 'customers',
         name: 'Customers',
         meta: { title: '客户管理', requiresAuth: true, roles: ['admin', 'manager', 'sales', 'support', 'viewer'] },
-        component: () => import('@/views/common/ModulePlaceholderView.vue')
+        component: () => import('@/views/customers/CustomerListView.vue')
+      },
+      {
+        path: 'customers/:id',
+        name: 'CustomerDetail',
+        meta: { title: '客户详情', requiresAuth: true, roles: ['admin', 'manager', 'sales', 'support', 'viewer'] },
+        component: () => import('@/views/customers/CustomerDetailView.vue')
       },
       {
         path: 'opportunities',
