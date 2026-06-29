@@ -30,8 +30,8 @@ const ROLE_NAMES = {
  */
 export const ROLE_PERMISSIONS = {
   admin:   ['*'],
-  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'contract:view', 'contract:approve', 'ticket:view'],
-  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'contract:view'],
+  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:approve', 'ticket:view'],
+  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view'],
   support: ['dashboard:view', 'customer:view', 'customer:follow', 'ticket:view', 'ticket:handle'],
   viewer:  ['dashboard:view', 'customer:view']
 }
@@ -199,36 +199,157 @@ export function generateCustomers(profiles) {
 }
 
 /**
- * 商机阶段
+ * 商机阶段（含概率权重）
+ *
+ * 阶段与概率映射：
+ *   lead         → 10%
+ *   qualified    → 30%
+ *   proposal     → 50%
+ *   negotiation  → 75%
+ *   won          → 100%
+ *   lost         → 0%
  */
-const OPP_STAGES = ['qualification', 'qualification', 'proposal', 'proposal', 'negotiation', 'closed_won', 'closed_lost']
+export const OPP_STAGES = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost']
 
 /**
- * 生成商机数据（20~30 条）
+ * 商机阶段中文名映射
+ */
+export const OPP_STAGE_LABELS = {
+  lead: '初步接触',
+  qualified: '需求确认',
+  proposal: '方案报价',
+  negotiation: '商务谈判',
+  won: '赢单',
+  lost: '输单'
+}
+
+/**
+ * 商机阶段对应概率
+ */
+export const OPP_STAGE_PROBABILITY = {
+  lead: 10,
+  qualified: 30,
+  proposal: 50,
+  negotiation: 75,
+  won: 100,
+  lost: 0
+}
+
+/**
+ * 商机阶段在表格/统计中的显示顺序
+ */
+export const OPP_STAGE_ORDER = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost']
+
+/**
+ * 商机阶段允许流转规则
+ * key 为当前阶段，value 为可流转到的阶段列表
+ */
+export const OPP_STAGE_TRANSITIONS = {
+  lead: ['qualified', 'lost'],
+  qualified: ['proposal', 'lost'],
+  proposal: ['negotiation', 'lost'],
+  negotiation: ['won', 'lost'],
+  won: [],
+  lost: []
+}
+
+/**
+ * 生成商机数据（40~48 条）
  * @param {Array} customers - 客户列表
  * @param {Array} profiles  - 用户档案列表
  */
 export function generateOpportunities(customers, profiles) {
-  const count = faker.number.int({ min: 20, max: 30 })
+  const count = faker.number.int({ min: 40, max: 48 })
   const opportunities = []
   for (let i = 0; i < count; i++) {
+    const stage = faker.helpers.arrayElement(OPP_STAGES)
+    const probability = OPP_STAGE_PROBABILITY[stage]
+    const createdAt = faker.date.between({ from: '2025-06-01', to: new Date() }).toISOString()
+    const expectedCloseDate = faker.date.between({ from: '2026-01-01', to: '2027-06-01' }).toISOString()
+
     opportunities.push({
       id: faker.string.uuid(),
       title: faker.helpers.arrayElement([
-        `${faker.company.buzzPhrase()}项目`,
-        `${faker.company.buzzNoun()}升级方案`,
-        `${faker.company.buzzVerb()}合作计划`
+        `${faker.company.buzzNoun()}数字化升级项目`,
+        `${faker.company.buzzVerb()}平台建设项目`,
+        `${faker.company.buzzNoun()}系统集成方案`,
+        `企业${faker.company.buzzNoun()}解决方案`,
+        `${faker.company.buzzVerb()}服务合作协议`
       ]),
       customerId: faker.helpers.arrayElement(customers).id,
       ownerId: pickUserId(profiles),
+      stage,
+      probability,
       amount: faker.number.int({ min: 50000, max: 5000000 }),
-      stage: faker.helpers.arrayElement(OPP_STAGES),
-      probability: faker.number.int({ min: 10, max: 100 }),
-      expectedCloseDate: faker.date.between({ from: '2026-01-01', to: '2027-06-01' }).toISOString(),
-      createdAt: faker.date.between({ from: '2025-06-01', to: new Date() }).toISOString()
+      expectedCloseDate,
+      nextStep: faker.helpers.arrayElement([
+        '安排产品演示',
+        '准备详细报价',
+        '客户高层拜访',
+        '技术方案评审',
+        '合同条款协商',
+        '等待客户内部审批',
+        '推进POC测试',
+        '商务谈判准备'
+      ]),
+      description: faker.helpers.arrayElement([
+        '客户信息化建设重点项目，预算充足',
+        '老客户增购需求，合作基础好',
+        '竞争对手已介入，需加速推进',
+        '客户需求明确，周期较短',
+        '战略级项目，高层高度关注',
+        '客户首次合作，需建立信任',
+        '项目涉及多个部门，决策链较长'
+      ]),
+      createdAt,
+      updatedAt: faker.date.between({ from: createdAt, to: new Date() }).toISOString()
     })
   }
   return opportunities
+}
+
+/**
+ * 生成商机阶段流转记录
+ * 每个商机生成 1~2 条历史记录（模拟阶段推进过程）
+ * @param {Array} opportunities - 商机列表
+ * @param {Array} profiles - 用户档案列表
+ */
+export function generateOpportunityStageRecords(opportunities, _profiles) {
+  const records = []
+  for (const opp of opportunities) {
+    // 记录初始阶段
+    records.push({
+      id: faker.string.uuid(),
+      opportunityId: opp.id,
+      fromStage: null,
+      toStage: opp.stage,
+      changedBy: opp.ownerId,
+      note: '初始创建',
+      changedAt: opp.createdAt
+    })
+
+    // 如果阶段靠后，模拟一条推进记录
+    const stageIndex = OPP_STAGE_ORDER.indexOf(opp.stage)
+    if (stageIndex >= 2) {
+      const prevStage = OPP_STAGE_ORDER[stageIndex - 1]
+      const changedAt = faker.date.between({ from: opp.createdAt, to: new Date() }).toISOString()
+      records.push({
+        id: faker.string.uuid(),
+        opportunityId: opp.id,
+        fromStage: prevStage,
+        toStage: opp.stage,
+        changedBy: opp.ownerId,
+        note: faker.helpers.arrayElement([
+          '需求确认完成，推进方案阶段',
+          '方案评审通过，进入商务谈判',
+          '客户需求明确，阶段推进',
+          '经过多次沟通，达成一致推进'
+        ]),
+        changedAt
+      })
+    }
+  }
+  return records
 }
 
 /**

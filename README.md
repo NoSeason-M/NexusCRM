@@ -29,6 +29,7 @@ nexus-crm/
     │   ├── request.js            # Axios 实例（Token 拦截器、错误处理）
     │   ├── auth.js               # 认证 API（login/logout/profile/routes/permissions）
     │   ├── customer.js           # 客户管理 API（列表/详情/筛选选项）
+    │   ├── opportunity.js        # 商机管理 API（列表/统计/看板/CRUD/阶段流转）
     │   ├── dashboard.js          # Dashboard API（概览指标、客户选项）
     │   └── mock.js               # Mock API 函数
     ├── composables/
@@ -45,9 +46,10 @@ nexus-crm/
     │   │   ├── seed.js           # Faker.js 种子数据（zh_CN + seed 2026）
     │   │   ├── store.js          # localStorage 持久化存储（含 DATABASE_VERSION 版本校验）
     │   │   ├── dashboard.js      # Dashboard 数据聚合层（filter/reduce 统计）
-    │   │   └── customers.js      # 客户查询层（组合筛选 + 分页 + 详情）
+    │   │   ├── customers.js      # 客户查询层（组合筛选 + 分页 + 详情 + 校验）
+    │   │   └── opportunities.js  # 商机查询层（列表/统计/详情/看板/校验/阶段流转）
     │   └── handlers/
-    │       └── index.js          # MSW 接口处理器（认证 + dashboard 接口）
+    │       └── index.js          # MSW 接口处理器（认证 + dashboard + 客户 + 商机）
     ├── router/
     │   ├── index.js              # 路由配置 + 导航守卫（鉴权 + 角色权限检查）
     │   └── menu.js               # 侧边栏菜单配置（备用，现由动态菜单取代）
@@ -72,6 +74,13 @@ nexus-crm/
         │   ├── CustomerDetailView.vue   # 客户详情页（基本信息/负责人/联系人/跟进时间线）
         │   ├── CustomerFormDialog.vue   # 客户新增/编辑弹窗
         │   └── FollowFormDialog.vue     # 跟进记录新增弹窗
+        ├── opportunities/
+        │   ├── OpportunityListView.vue   # 商机列表页（统计概览/筛选/分页表格/CRUD）
+        │   ├── OpportunityBoardView.vue  # 销售阶段看板（6 列卡片墙/阶段推进/双视图切换）
+        │   ├── OpportunityDetailView.vue # 商机详情页（基本信息/阶段流转按钮/流转历史时间线）
+        │   ├── OpportunityFormDialog.vue # 商机新增/编辑弹窗
+        │   └── components/
+        │       └── OpportunityCard.vue   # 看板卡片组件（商机摘要/阶段推进按钮）
         ├── dashboard/
         │   ├── DashboardView.vue # 工作台页面（指标卡 + 待办/跟进 + 3 个图表）
         │   ├── chartOptions.js   # ECharts option 工厂函数（漏斗/趋势/饼图）
@@ -96,7 +105,9 @@ nexus-crm/
 | `/dashboard` | DashboardView | ✅ | 全部角色 | 工作台（6 个指标卡，loading/error/empty 状态处理） |
 | `/customers` | CustomerListView | ✅ | 全部角色 | 客户管理（搜索/筛选/分页列表） |
 | `/customers/:id` | CustomerDetailView | ✅ | 全部角色 | 客户详情（基本信息/负责人变更/联系人/跟进时间线） |
-| `/opportunities` | ModulePlaceholderView | ✅ | admin / manager / sales | 商机管理 |
+| `/opportunities` | OpportunityListView | ✅ | admin / manager / sales | 商机列表（统计/筛选/CRUD） |
+| `/opportunities/board` | OpportunityBoardView | ✅ | admin / manager / sales | 销售阶段看板（6 列卡片墙） |
+| `/opportunities/:id` | OpportunityDetailView | ✅ | admin / manager / sales | 商机详情（阶段流转/历史记录） |
 | `/contracts` | ModulePlaceholderView | ✅ | admin / manager / sales | 合同管理 |
 | `/tickets` | ModulePlaceholderView | ✅ | admin / manager / support | 工单管理 |
 | `/settings` | ModulePlaceholderView | ✅ | admin | 系统设置 |
@@ -173,7 +184,8 @@ Token 基于 Base64 编码的 JSON 负载模拟，存储在 `localStorage`。Axi
 | 实体 | 生成数量 | 关键字段 |
 |------|---------|---------|
 | 客户 (customers) | 30~40 条 | id, name, industry, level (platinum/gold/silver/regular), status (active/potential/inactive/at_risk/lead), ownerId, province, city, address, source, contactName, contactPhone, contactTitle, contactEmail, description, lastFollowAt, createdAt, updatedAt |
-| 商机 (opportunities) | 20~30 条 | id, title, customerId, ownerId, amount, stage (qualification/proposal/negotiation/closed_won/closed_lost) |
+| 商机 (opportunities) | 40~48 条 | id, title, customerId, ownerId, amount, stage (lead/qualified/proposal/negotiation/won/lost), probability (10/30/50/75/100/0), expectedCloseDate, nextStep, description, createdAt, updatedAt |
+| 商机阶段流转记录 (opportunityStageRecords) | 每个商机 1~2 条 | id, opportunityId, fromStage, toStage, changedBy, note, changedAt |
 | 合同 (contracts) | 25~35 条 | id, title, customerId, opportunityId, amount, status (draft/pending_approval/active/completed/terminated) |
 | 工单 (tickets) | 20~25 条 | id, title, customerId, assigneeId, priority (low/medium/high/urgent), status (open/in_progress/pending/resolved/closed) |
 | 待办 (todos) | 8~12 条 | id, title, customerId, ownerId, priority (high/medium/low), status (pending/in_progress/completed), dueAt |
@@ -319,7 +331,11 @@ hasAnyPermission(permissions, ['customer:create', ...]) // 是否拥有任一权
 | `customer:delete` | 删除客户 | admin / manager / sales（sales 仅限本人负责的客户） |
 | `customer:assign` | 转移负责人 | admin / manager |
 | `customer:follow` | 记录跟进 | admin / manager / sales / support |
+| `opportunity:view` | 查看商机 | admin / manager / sales |
 | `opportunity:create` | 新建商机 | admin / manager / sales |
+| `opportunity:edit` | 编辑商机 | admin / manager / sales |
+| `opportunity:delete` | 删除商机 | admin / manager / sales |
+| `opportunity:stage` | 阶段流转 | admin / manager / sales |
 | `contract:approve` | 审批合同 | admin / manager |
 | `ticket:handle` | 处理工单 | admin / support |
 | `*` | 通配（admin 专有）| admin |
@@ -480,6 +496,20 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 | `POST` | `/api/customers/:id/follows` | 新增跟进记录（校验 method/content，自动更新 lastFollowAt） |
 | `PUT` | `/api/customers/:id/owner` | 变更客户负责人（校验 ownerId 存在且活跃） |
 
+### 商机接口
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| `GET` | `/api/opportunities` | opportunity:view | 组合查询 + 分页列表（keyword/stage/ownerId/dateRange/page/pageSize） |
+| `GET` | `/api/opportunities/statistics` | opportunity:view | 商机统计概览（总数/总额/赢单额/平均概率/逾期数/阶段分布） |
+| `GET` | `/api/opportunities/options` | - | 筛选选项（阶段/负责人下拉） |
+| `GET` | `/api/opportunities/board` | opportunity:view | 销售阶段看板（按 lead→lost 6 个阶段分组，含 count/amount/cards） |
+| `GET` | `/api/opportunities/:id` | opportunity:view | 商机详情（含 customerName/ownerName/stageLabel/stageRecords） |
+| `POST` | `/api/opportunities` | opportunity:create | 新建商机（校验输入，记录初始阶段） |
+| `PUT` | `/api/opportunities/:id` | opportunity:edit | 更新商机（禁止修改 stage） |
+| `DELETE` | `/api/opportunities/:id` | opportunity:delete | 删除商机（关联合同检测 → 409 冲突） |
+| `PATCH` | `/api/opportunities/:id/stage` | opportunity:stage | 阶段流转（校验流转规则，记录流转历史） |
+
 ### CRUD 错误码
 
 | 状态码 | 说明 |
@@ -537,6 +567,92 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 - `changePageSize(val)` — 切换每页条数（自动回到第一页）
 
 数据源使用 Faker.js 中文语言包（`zh_CN`），固定种子 `2026`，确保每次开发环境启动数据一致。数据持久化在 `localStorage` 中。
+
+## 商机管理模块
+
+商机模块提供列表、看板、详情三种视图，支持完整的 CRUD 和阶段流转。
+
+### 商机数据模型
+
+商机有 6 个阶段，形成完整的销售漏斗：
+
+| 阶段 | 编码 | 概率 | 可流转至 |
+|------|------|------|----------|
+| 初步接触 | lead | 10% | qualified / lost |
+| 需求确认 | qualified | 30% | proposal / lost |
+| 方案报价 | proposal | 50% | negotiation / lost |
+| 商务谈判 | negotiation | 75% | won / lost |
+| 赢单 | won | 100% | -（终态） |
+| 输单 | lost | 0% | -（终态） |
+
+阶段流转规则在 `OPP_STAGE_TRANSITIONS` 中定义，只能按顺序推进（lead → qualified → proposal → negotiation → won/lost），不可跳跃或回退。won/lost 为终态，不可再流转。
+
+### 商机列表页
+
+`/opportunities` 路由指向 `OpportunityListView.vue`：
+
+- **统计概览**：5 个指标卡（商机总数、商机总额、赢单金额、平均概率、逾期商机）+ 阶段分布横条图
+- **筛选区**：关键词搜索、阶段筛选、负责人筛选、预计关闭日期范围
+- **分页表格**：10 列（名称、客户、阶段标签、金额、概率、预计关闭日期含逾期标记、负责人、下一步、操作）
+- **CRUD**：新建/编辑通过 `OpportunityFormDialog` 弹窗，删除二次确认
+- **双视图切换**：右上角"看板视图"按钮切换至 `/opportunities/board`
+- **权限控制**：`opportunity:create/edit/delete` 控制按钮显隐
+
+### 商机看板页
+
+`/opportunities/board` 路由指向 `OpportunityBoardView.vue`：
+
+- **看板布局**：6 列卡片墙（lead→lost），水平滚动，每列显示阶段色点 + 标签 + 卡片计数 + 金额合计
+- **卡片组件**（`OpportunityCard.vue`）：展示商机名称、阶段标签、客户、金额（高亮）、概率、负责人、预计关闭日期（逾期红色警告）、下一步
+- **阶段推进**：卡片底部根据当前阶段显示推进按钮（lead→qualified、qualified→proposal 等），negotiation 阶段弹窗选择赢单/输单
+- **详情跳转**：点击卡片跳转 `/opportunities/:id`
+- **双视图切换**：右上角"列表视图"按钮切换回列表
+- **多状态处理**：加载骨架屏（6 列骨架）、错误重试、空数据
+
+### 商机详情页
+
+`/opportunities/:id` 路由指向 `OpportunityDetailView.vue`：
+
+- **基本信息**：商机名称、客户名称、负责人、当前阶段标签、金额、概率、预计关闭日期、创建/更新时间、下一步计划、项目描述
+- **阶段流转按钮**：根据当前阶段动态显示可流转目标，lost 确认弹窗（warning），won 确认弹窗（success）
+- **流转历史时间线**：按时间倒序排列，每项展示 fromStage→toStage 箭头、操作人、时间、备注，不同阶段对应不同颜色圆点
+
+### 商机表单弹窗 OpportunityFormDialog
+
+`src/views/opportunities/OpportunityFormDialog.vue`：
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| modelValue | Boolean | v-model 控制显隐 |
+| opportunity | Object / null | null=新建 / Object=编辑回填 |
+| saving | Boolean | 是否保存中 |
+
+表单字段：商机名称（必填，max100）、关联客户（必填，编辑禁用）、商机金额（必填，>0）、当前阶段（编辑禁用，lead/qualified/proposal/negotiation）、预计关闭日期、负责人、下一步计划（max500）、项目描述（max500）
+
+### 商机输入校验
+
+`src/mock/database/opportunities.js` 中的 `validateOpportunityInput()` 函数：
+
+1. title：必填，1~100 字符
+2. customerId：必须在 customers 中存在且非 inactive
+3. amount：必填，parseFloat > 0
+4. stage：仅在新建时可选，不可为 won/lost
+5. ownerId：可选，如提供需在 profiles 中非 inactive
+6. nextStep：可选，最多 500 字符
+
+### 阶段流转校验
+
+`validateStageTransition(opportunity, input)` 校验规则：
+
+1. toStage 必填
+2. 检查 toStage 是否在 `OPP_STAGE_TRANSITIONS[当前阶段]` 内
+3. won/lost 终态不可再流转
+4. note 选填，最多 500 字符
+5. 校验失败返回 409，附带具体错误信息
+
+### 删除冲突检测
+
+`getOpportunityDeleteConflict(database, opportunityId)` 检查合同关联。存在合同引用时 API 返回 409。
 
 ## 构建
 

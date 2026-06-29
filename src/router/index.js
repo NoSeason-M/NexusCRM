@@ -35,7 +35,19 @@ const routes = [
         path: 'opportunities',
         name: 'Opportunities',
         meta: { title: '商机管理', requiresAuth: true, roles: ['admin', 'manager', 'sales'] },
-        component: () => import('@/views/common/ModulePlaceholderView.vue')
+        component: () => import('@/views/opportunities/OpportunityListView.vue')
+      },
+      {
+        path: 'opportunities/board',
+        name: 'OpportunityBoard',
+        meta: { title: '商机看板', requiresAuth: true, roles: ['admin', 'manager', 'sales'] },
+        component: () => import('@/views/opportunities/OpportunityBoardView.vue')
+      },
+      {
+        path: 'opportunities/:id',
+        name: 'OpportunityDetail',
+        meta: { title: '商机详情', requiresAuth: true, roles: ['admin', 'manager', 'sales'] },
+        component: () => import('@/views/opportunities/OpportunityDetailView.vue')
       },
       {
         path: 'contracts',

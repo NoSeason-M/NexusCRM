@@ -4,6 +4,7 @@ import {
   generateProfiles,
   generateCustomers,
   generateOpportunities,
+  generateOpportunityStageRecords,
   generateContracts,
   generateTickets,
   generateDocuments,
@@ -14,7 +15,7 @@ import {
 const STORAGE_KEY = 'nexus-crm-mock-data'
 
 /** 数据版本号，用于增量迁移 */
-export const DATABASE_VERSION = 4
+export const DATABASE_VERSION = 6
 
 /**
  * 从 localStorage 加载数据，不存在或不完整则返回 null（触发 reset）
@@ -56,6 +57,7 @@ function reset() {
 
   const todos = generateTodos(customers, profiles)
   const recentFollows = generateRecentFollows(customers, profiles)
+  const opportunityStageRecords = generateOpportunityStageRecords(opportunities, profiles)
 
   const data = {
     version: DATABASE_VERSION,
@@ -72,7 +74,8 @@ function reset() {
     tickets,
     documents,
     todos,
-    recentFollows
+    recentFollows,
+    opportunityStageRecords
   }
   save(data)
   return data

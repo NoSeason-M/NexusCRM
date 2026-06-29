@@ -10,6 +10,16 @@ import {
   validateFollowRecordInput
 } from '../database/customers'
 import {
+  queryOpportunities,
+  getOpportunityOptions,
+  createOpportunityStatistics,
+  getOpportunityDetail,
+  validateOpportunityInput,
+  validateStageTransition,
+  getOpportunityDeleteConflict,
+  createOpportunityBoard
+} from '../database/opportunities'
+import {
   createDashboardSummary,
   createSalesFunnel,
   createContractTrend,
@@ -666,5 +676,255 @@ export const handlers = [
       ownerName: ownerProfile.name,
       updatedAt: now
     })
+  }),
+
+  // ──── 商机管理接口 ────
+
+  // GET /api/opportunities — 组合查询 + 分页商机列表
+  http.get('/api/opportunities', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:view') && !perms.includes('*')) {
+      return fail('无权限查看商机', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = queryOpportunities(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/opportunities/statistics — 商机统计概览
+  http.get('/api/opportunities/statistics', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:view') && !perms.includes('*')) {
+      return fail('无权限查看商机统计', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const statistics = createOpportunityStatistics(store, searchParams)
+    return success(statistics)
+  }),
+
+  // GET /api/opportunities/options — 商机筛选选项
+  http.get('/api/opportunities/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const store = getStore()
+    const options = getOpportunityOptions(store)
+    return success(options)
+  }),
+
+  // GET /api/opportunities/:id — 商机详情
+  http.get('/api/opportunities/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:view') && !perms.includes('*')) {
+      return fail('无权限查看商机', 1006, 403)
+    }
+
+    const store = getStore()
+    const detail = getOpportunityDetail(store, params.id)
+    if (!detail) return fail('商机不存在', 1005, 404)
+    return success(detail)
+  }),
+
+  // POST /api/opportunities — 新建商机
+  http.post('/api/opportunities', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:create') && !perms.includes('*')) {
+      return fail('无权限新建商机', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    const { valid, errors, data } = validateOpportunityInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    const opportunity = {
+      id: crypto.randomUUID(),
+      ...data,
+      ownerId: data.ownerId || user.id,
+      probability: data.probability || 10,
+      expectedCloseDate: data.expectedCloseDate || null,
+      createdAt: now,
+      updatedAt: now
+    }
+    store.opportunities.unshift(opportunity)
+
+    // 记录初始阶段
+    if (!store.opportunityStageRecords) store.opportunityStageRecords = []
+    store.opportunityStageRecords.unshift({
+      id: crypto.randomUUID(),
+      opportunityId: opportunity.id,
+      fromStage: null,
+      toStage: opportunity.stage,
+      changedBy: user.id,
+      note: '初始创建',
+      changedAt: now
+    })
+
+    return success(opportunity)
+  }),
+
+  // PUT /api/opportunities/:id — 更新商机（禁止修改 stage）
+  http.put('/api/opportunities/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:edit') && !perms.includes('*')) {
+      return fail('无权限编辑商机', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.opportunities.findIndex(o => o.id === params.id)
+    if (idx === -1) return fail('商机不存在', 1005, 404)
+
+    const existing = store.opportunities[idx]
+    const body = await request.json()
+
+    // 禁止修改 stage（由专门的 stage 控制器处理）
+    const safeBody = { ...body }
+    delete safeBody.stage
+    delete safeBody.stageLabel
+
+    // 校验（排除自身）
+    const { valid, errors, data } = validateOpportunityInput(store, { ...existing, ...safeBody })
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    store.opportunities[idx] = {
+      ...existing,
+      ...data,
+      id: existing.id,
+      stage: existing.stage,
+      probability: existing.probability,
+      createdAt: existing.createdAt,
+      updatedAt: now
+    }
+    return success(store.opportunities[idx])
+  }),
+
+  // DELETE /api/opportunities/:id — 删除商机
+  http.delete('/api/opportunities/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:delete') && !perms.includes('*')) {
+      return fail('无权限删除商机', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.opportunities.findIndex(o => o.id === params.id)
+    if (idx === -1) return fail('商机不存在', 1005, 404)
+
+    // 关联冲突检查
+    const conflict = getOpportunityDeleteConflict(store, params.id)
+    if (conflict.hasConflict) {
+      const detail = conflict.conflicts.map(c => `${c.type}(${c.count})`).join('、')
+      return fail(`该商机存在关联数据（${detail}），无法删除`, 1009, 409)
+    }
+
+    store.opportunities.splice(idx, 1)
+    // 同时清理阶段流转记录
+    if (store.opportunityStageRecords) {
+      store.opportunityStageRecords = store.opportunityStageRecords.filter(r => r.opportunityId !== params.id)
+    }
+    return success({ message: '商机已删除' })
+  }),
+
+  // PATCH /api/opportunities/:id/stage — 商机阶段流转
+  http.patch('/api/opportunities/:id/stage', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:stage') && !perms.includes('*')) {
+      return fail('没有权限进行阶段流转', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.opportunities.findIndex(o => o.id === params.id)
+    if (idx === -1) return fail('商机不存在', 1005, 404)
+
+    const opp = store.opportunities[idx]
+    const body = await request.json()
+
+    // 校验流转
+    const { valid, errors } = validateStageTransition(opp, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 409)
+    }
+
+    const now = new Date().toISOString()
+    const toStage = body.toStage
+    const toProbability = { lead: 10, qualified: 30, proposal: 50, negotiation: 75, won: 100, lost: 0 }[toStage] || 0
+
+    // 更新商机
+    store.opportunities[idx].stage = toStage
+    store.opportunities[idx].probability = toProbability
+    if (body.nextStep) store.opportunities[idx].nextStep = body.nextStep
+    store.opportunities[idx].updatedAt = now
+
+    // 记录流转历史
+    if (!store.opportunityStageRecords) store.opportunityStageRecords = []
+    store.opportunityStageRecords.unshift({
+      id: crypto.randomUUID(),
+      opportunityId: params.id,
+      fromStage: opp.stage,
+      toStage,
+      changedBy: user.id,
+      note: body.note || '',
+      changedAt: now
+    })
+
+    return success({
+      id: store.opportunities[idx].id,
+      stage: store.opportunities[idx].stage,
+      probability: store.opportunities[idx].probability,
+      updatedAt: now
+    })
+  }),
+
+  // ──── 商机看板接口 ────
+
+  // GET /api/opportunities/board — 商机看板（按阶段分组）
+  http.get('/api/opportunities/board', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:view') && !perms.includes('*')) {
+      return fail('无权限查看商机', 1006, 403)
+    }
+
+    const store = getStore()
+    const board = createOpportunityBoard(store)
+    return success(board)
   })
 ]
