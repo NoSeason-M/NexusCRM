@@ -30,6 +30,7 @@ nexus-crm/
     │   ├── auth.js               # 认证 API（login/logout/profile/routes/permissions）
     │   ├── customer.js           # 客户管理 API（列表/详情/筛选选项）
     │   ├── opportunity.js        # 商机管理 API（列表/统计/看板/CRUD/阶段流转）
+    │   ├── contract.js           # 合同管理 API（列表/统计/到期提醒/CRUD/详情/状态流转/附件上传/删除）
     │   ├── dashboard.js          # Dashboard API（概览指标、客户选项）
     │   └── mock.js               # Mock API 函数
     ├── composables/
@@ -45,11 +46,12 @@ nexus-crm/
     │   ├── database/
     │   │   ├── seed.js           # Faker.js 种子数据（zh_CN + seed 2026）
     │   │   ├── store.js          # localStorage 持久化存储（含 DATABASE_VERSION 版本校验）
-    │   │   ├── dashboard.js      # Dashboard 数据聚合层（filter/reduce 统计）
+    │   │   ├── dashboard.js      # Dashboard 数据聚合层（filter/reduce 统计 + 到期合同概览）
     │   │   ├── customers.js      # 客户查询层（组合筛选 + 分页 + 详情 + 校验）
-    │   │   └── opportunities.js  # 商机查询层（列表/统计/详情/看板/校验/阶段流转）
+    │   │   ├── opportunities.js  # 商机查询层（列表/统计/详情/看板/校验/阶段流转）
+    │   │   └── contracts.js      # 合同查询层（列表/统计/到期提醒/详情/输入校验/状态流转/附件管理）
     │   └── handlers/
-    │       └── index.js          # MSW 接口处理器（认证 + dashboard + 客户 + 商机）
+    │       └── index.js          # MSW 接口处理器（认证 + dashboard + 客户 + 商机 + 合同）
     ├── router/
     │   ├── index.js              # 路由配置 + 导航守卫（鉴权 + 角色权限检查）
     │   └── menu.js               # 侧边栏菜单配置（备用，现由动态菜单取代）
@@ -74,6 +76,11 @@ nexus-crm/
         │   ├── CustomerDetailView.vue   # 客户详情页（基本信息/负责人/联系人/跟进时间线）
         │   ├── CustomerFormDialog.vue   # 客户新增/编辑弹窗
         │   └── FollowFormDialog.vue     # 跟进记录新增弹窗
+        ├── contracts/
+        │   ├── ContractListView.vue      # 合同列表页（到期提醒/统计卡片/筛选/分页表格/CRUD）
+        │   ├── ContractDetailView.vue    # 合同详情页（基本信息/状态流转按钮/审批记录时间线/附件上传/删除）
+        │   └── components/
+        │       └── ContractFormDialog.vue # 合同新增/编辑弹窗
         ├── opportunities/
         │   ├── OpportunityListView.vue   # 商机列表页（统计概览/筛选/分页表格/CRUD）
         │   ├── OpportunityBoardView.vue  # 销售阶段看板（6 列卡片墙/阶段推进/双视图切换）
@@ -82,7 +89,7 @@ nexus-crm/
         │   └── components/
         │       └── OpportunityCard.vue   # 看板卡片组件（商机摘要/阶段推进按钮）
         ├── dashboard/
-        │   ├── DashboardView.vue # 工作台页面（指标卡 + 待办/跟进 + 3 个图表）
+        │   ├── DashboardView.vue # 工作台页面（指标卡 + 到期提醒横幅 + 待办/跟进 + 3 个图表）
         │   ├── chartOptions.js   # ECharts option 工厂函数（漏斗/趋势/饼图）
         │   └── components/
         │       ├── MetricCard.vue      # 指标卡组件（4 种色调，悬停动效）
@@ -102,13 +109,14 @@ nexus-crm/
 | 路径 | 页面 | Layout | 角色限制 | 说明 |
 |------|------|--------|----------|------|
 | `/login` | LoginView | ❌ | - | 登录页（路由守卫白名单） |
-| `/dashboard` | DashboardView | ✅ | 全部角色 | 工作台（6 个指标卡，loading/error/empty 状态处理） |
+| `/dashboard` | DashboardView | ✅ | 全部角色 | 工作台（6 个指标卡 + 到期提醒 + 待办/跟进 + 3 个图表，loading/error/empty 状态处理） |
 | `/customers` | CustomerListView | ✅ | 全部角色 | 客户管理（搜索/筛选/分页列表） |
 | `/customers/:id` | CustomerDetailView | ✅ | 全部角色 | 客户详情（基本信息/负责人变更/联系人/跟进时间线） |
 | `/opportunities` | OpportunityListView | ✅ | admin / manager / sales | 商机列表（统计/筛选/CRUD） |
 | `/opportunities/board` | OpportunityBoardView | ✅ | admin / manager / sales | 销售阶段看板（6 列卡片墙） |
 | `/opportunities/:id` | OpportunityDetailView | ✅ | admin / manager / sales | 商机详情（阶段流转/历史记录） |
-| `/contracts` | ModulePlaceholderView | ✅ | admin / manager / sales | 合同管理 |
+| `/contracts` | ContractListView | ✅ | admin / manager / sales | 合同列表（到期提醒/统计/筛选/CRUD） |
+| `/contracts/:id` | ContractDetailView | ✅ | admin / manager / sales | 合同详情（状态流转/审批记录/附件） |
 | `/tickets` | ModulePlaceholderView | ✅ | admin / manager / support | 工单管理 |
 | `/settings` | ModulePlaceholderView | ✅ | admin | 系统设置 |
 | `/api-docs` | ApiDocsView | ✅ | 全部角色 | 接口文档 |
@@ -186,7 +194,9 @@ Token 基于 Base64 编码的 JSON 负载模拟，存储在 `localStorage`。Axi
 | 客户 (customers) | 30~40 条 | id, name, industry, level (platinum/gold/silver/regular), status (active/potential/inactive/at_risk/lead), ownerId, province, city, address, source, contactName, contactPhone, contactTitle, contactEmail, description, lastFollowAt, createdAt, updatedAt |
 | 商机 (opportunities) | 40~48 条 | id, title, customerId, ownerId, amount, stage (lead/qualified/proposal/negotiation/won/lost), probability (10/30/50/75/100/0), expectedCloseDate, nextStep, description, createdAt, updatedAt |
 | 商机阶段流转记录 (opportunityStageRecords) | 每个商机 1~2 条 | id, opportunityId, fromStage, toStage, changedBy, note, changedAt |
-| 合同 (contracts) | 25~35 条 | id, title, customerId, opportunityId, amount, status (draft/pending_approval/active/completed/terminated) |
+| 合同 (contracts) | 30 条 | id, contractNo (CT-20260001 自增), name, customerId, opportunityId, ownerId, amount, status (draft/approving/approved/rejected/signed/archived), startDate, endDate, signedAt, description, createdAt, updatedAt |
+| 合同审批记录 (contractApprovalRecords) | 每个合同 1~3 条 | id, contractId, fromStatus, toStatus, action (submit/approve/reject/sign/archive), operatorId, comment, operatedAt |
+| 合同附件 (contractAttachments) | 每个合同 0~3 个 | id, contractId, name, type, size, url, uploadedBy, uploadedAt |
 | 工单 (tickets) | 20~25 条 | id, title, customerId, assigneeId, priority (low/medium/high/urgent), status (open/in_progress/pending/resolved/closed) |
 | 待办 (todos) | 8~12 条 | id, title, customerId, ownerId, priority (high/medium/low), status (pending/in_progress/completed), dueAt |
 | 跟进记录 (recentFollows) | 每个客户 2~4 条 | id, customerId, ownerId, method (phone/visit/wechat/email), content, nextFollowAt, createdAt |
@@ -336,7 +346,12 @@ hasAnyPermission(permissions, ['customer:create', ...]) // 是否拥有任一权
 | `opportunity:edit` | 编辑商机 | admin / manager / sales |
 | `opportunity:delete` | 删除商机 | admin / manager / sales |
 | `opportunity:stage` | 阶段流转 | admin / manager / sales |
-| `contract:approve` | 审批合同 | admin / manager |
+| `contract:view` | 查看合同 | admin / manager / sales |
+| `contract:create` | 新建合同 | admin / manager / sales |
+| `contract:edit` | 编辑合同（draft/rejected 状态）| admin / manager |
+| `contract:delete` | 删除合同 | admin / manager |
+| `contract:approve` | 合同审批（approving→approved/rejected）| admin / manager |
+| `contract:attachment` | 合同附件管理（上传/删除）| admin / manager / sales |
 | `ticket:handle` | 处理工单 | admin / support |
 | `*` | 通配（admin 专有）| admin |
 
@@ -372,7 +387,7 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/dashboard/summary` | 工作台概览指标（6 个核心指标 + 销售漏斗 + 合同趋势 + 工单分布） |
+| `GET` | `/api/dashboard/summary` | 工作台概览指标（6 个核心指标 + 销售漏斗 + 合同趋势 + 工单分布 + 到期合同概览） |
 | `GET` | `/api/dashboard/customers` | 客户选项列表（id + name + status，用于筛选器下拉） |
 | `GET` | `/api/dashboard/todos` | 待办列表（含 customerName/ownerName） |
 | `POST` | `/api/dashboard/todos` | 新建待办 |
@@ -384,8 +399,9 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 | `GET` | `/api/dashboard/charts/sales-funnel` | 销售漏斗数据（stage, label, count, amount） |
 | `GET` | `/api/dashboard/charts/contract-trend` | 合同签约趋势（month, count, amount） |
 | `GET` | `/api/dashboard/charts/ticket-status` | 工单状态分布（status, label, count） |
+| `GET` | `/api/dashboard/contracts/expiring` | 到期合同概览（expiring/expired 数量 + 金额） |
 
-`/api/dashboard/summary` 和图表接口支持以下查询参数：
+`/api/dashboard/summary`、`/api/dashboard/contracts/expiring` 和图表接口支持以下查询参数：
 | 参数 | 值 | 效果 |
 |------|-----|------|
 | `scenario` | `empty` | 返回空数据（测试空数据状态） |
@@ -510,6 +526,35 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 | `DELETE` | `/api/opportunities/:id` | opportunity:delete | 删除商机（关联合同检测 → 409 冲突） |
 | `PATCH` | `/api/opportunities/:id/stage` | opportunity:stage | 阶段流转（校验流转规则，记录流转历史） |
 
+### 合同接口
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| `GET` | `/api/contracts` | contract:view | 组合查询 + 分页列表（keyword/status/customerId/ownerId/expiryStatus/dateRange/page/pageSize） |
+| `GET` | `/api/contracts/options` | - | 筛选选项（状态/客户/负责人下拉） |
+| `GET` | `/api/contracts/statistics` | contract:view | 合同统计概览（总数/总额/已签署额/待审批/即将到期/已过期/状态分布） |
+| `GET` | `/api/contracts/expiring` | contract:view | 到期合同列表（支持 ?days=30&limit=5 参数） |
+| `GET` | `/api/contracts/:id` | contract:view | 合同详情（含 approvalRecords 审批记录 + attachments 附件列表） |
+| `POST` | `/api/contracts` | contract:create | 新建合同（自动生成 contractNo，初始 draft 状态） |
+| `PUT` | `/api/contracts/:id` | contract:edit | 更新合同（仅 draft/rejected 状态允许编辑，禁止修改 status） |
+| `DELETE` | `/api/contracts/:id` | contract:delete | 删除合同（级联清理审批记录 + 附件） |
+| `PATCH` | `/api/contracts/:id/status` | contract:approve/edit | 状态流转（校验流转规则，记录审批记录，signed 时自动设置 signedAt） |
+| `POST` | `/api/contracts/:id/attachments` | contract:attachment | 上传附件（校验文件名/扩展名/大小；已归档 409） |
+| `DELETE` | `/api/contracts/:id/attachments/:attachmentId` | contract:attachment | 删除附件（校验合同 + 附件归属；已归档 409） |
+
+### 合同状态流转规则
+
+合同状态形成完整生命周期，严格按顺序推进：
+
+| 当前状态 | 可流转至 | 所需权限 | 操作说明 |
+|---------|---------|---------|---------|
+| draft（草稿） | approving | contract:approve | 提交审批 |
+| approving（审批中） | approved / rejected | contract:approve | 审批通过 / 驳回 |
+| approved（已审批） | signed | contract:edit | 签署合同 |
+| rejected（已驳回） | approving | contract:approve | 重新提交审批 |
+| signed（已签署） | archived | contract:edit | 归档（不可逆） |
+| archived（已归档） | - | - | 终态，不可再流转 |
+
 ### CRUD 错误码
 
 | 状态码 | 说明 |
@@ -519,6 +564,16 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 | 403 | 无权限（缺少 customer:edit/customer:delete/customer:assign/customer:follow） |
 | 404 | 客户不存在 |
 | 409 | 删除冲突（客户存在关联商机/合同/工单） |
+
+### 合同 CRUD 错误码
+
+| 状态码 | 说明 |
+|--------|------|
+| 400 | 校验失败（合同名称为空/超长、客户不存在、金额 ≤0、日期逻辑错误、附件扩展名不支持/超大小限制） |
+| 401 | 未登录或 Token 过期 |
+| 403 | 无权限（缺少 contract:create/edit/delete/approve/attachment） |
+| 404 | 合同或附件不存在 |
+| 409 | 状态冲突（仅 draft/rejected 可编辑、无效状态流转、已归档不可操作附件） |
 
 ### 输入校验逻辑
 
@@ -653,6 +708,125 @@ admin 角色的权限为 `['*']` 通配，因此拥有所有按钮权限。
 ### 删除冲突检测
 
 `getOpportunityDeleteConflict(database, opportunityId)` 检查合同关联。存在合同引用时 API 返回 409。
+
+## 合同管理模块
+
+合同模块提供列表和详情两种视图，支持完整的 CRUD、状态审批流转和到期提醒。
+
+### 合同生命周期
+
+合同状态形成完整审批流转链路：
+
+```mermaid
+flowchart LR
+  draft -->|提交审批| approving
+  approving -->|审批通过| approved
+  approving -->|驳回| rejected
+  rejected -->|重新提交| approving
+  approved -->|签署| signed
+  signed -->|归档| archived
+```
+
+- `draft`（草稿）/ `rejected`（已驳回）：可编辑内容
+- `approving`（审批中）：需要 `contract:approve` 权限操作
+- `approved`（已审批）→ `signed`（已签署）：签署时自动记录 `signedAt`
+- `archived`（已归档）：终态，不可再流转
+
+### 到期状态计算
+
+`getContractExpiry(contract, referenceDate)` 基于 `endDate` 实时计算：
+
+| 条件 | 到期状态 | 说明 |
+|------|---------|------|
+| daysRemaining < 0 | expired（已过期） | 结束日期已过 |
+| 0 ≤ daysRemaining ≤ 30 | expiring（即将到期） | 30 天内到期 |
+| daysRemaining > 30 | normal（正常） | 尚有充足时间 |
+
+到期状态在列表页实时计算展示，并支持按到期状态筛选（normal/expiring/expired）。
+
+### 合同列表页
+
+`/contracts` 路由指向 `ContractListView.vue`：
+
+- **到期提醒横幅**：顶部展示即将到期/已过期合同列表（按紧迫度排序），每天数标签
+- **统计概览**：6 个指标卡（合同总数、合同总额、已签署金额、待审批、即将到期、已过期）+ 状态分布横条图
+- **筛选区**：关键词搜索（名称/编号/客户）、状态、客户、负责人、到期状态（正常/即将到期/已过期）、结束日期范围
+- **分页表格**：10 列（编号、名称、客户、状态标签、金额、到期状态标签、结束日期、负责人、附件数、操作）
+- **CRUD**：新建通过 `ContractFormDialog` 弹窗，编辑（仅 draft/rejected 状态允许），删除二次确认
+- **行点击**：跳转 `/contracts/:id` 详情页
+- **权限控制**：`contract:create/edit/delete` 控制按钮显隐
+
+### 合同详情页
+
+`/contracts/:id` 路由指向 `ContractDetailView.vue`：
+
+- **基本信息**：合同名称、编号、客户、商机、负责人、金额、开始/结束日期、签署日期、创建/更新时间、描述
+- **状态流转按钮**：根据当前状态动态显示可操作按钮（提交审批、审批通过、驳回、签署、归档），驳回/归档需确认弹窗
+- **审批记录时间线**：按时间倒序排列，每项展示 toStatus→fromStatus 箭头、操作人、时间、备注，不同状态对应不同颜色圆点
+- **附件列表**：附件名称、类型标签、文件大小；有 `contract:attachment` 权限且未归档时可上传/删除
+- **上传**：通过 `<el-upload>` 组件限制 8 种格式（pdf/doc/docx/xls/xlsx/png/jpg/jpeg），10MB 上限，`auto-upload=false` 手动触发
+- **删除**：每项附件行显示删除按钮，弹窗确认后执行
+- **多状态处理**：加载骨架屏、404 错误提示 + 返回列表、正常展示
+
+### 合同表单弹窗 ContractFormDialog
+
+`src/views/contracts/components/ContractFormDialog.vue`：
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| modelValue | Boolean | v-model 控制显隐 |
+| contract | Object / null | null=新建 / Object=编辑回填 |
+| saving | Boolean | 是否保存中 |
+
+表单字段：合同名称（必填，max100）、关联客户（必填，编辑禁用）、合同金额（必填，>0）、开始/结束日期、关联商机、负责人、描述（max500）
+
+### 合同输入校验
+
+`src/mock/database/contracts.js` 中的 `validateContractInput()` 函数：
+
+1. name：必填，1~100 字符
+2. customerId：必须在 customers 中存在且非 inactive
+3. amount：必填，parseFloat > 0
+4. endDate > startDate：逻辑校验
+5. ownerId：可选，如提供需在 profiles 中非 inactive
+6. description：可选，最多 500 字符
+
+### 状态流转校验
+
+`validateContractStatusTransition(contract, input)` 校验规则：
+
+1. toStatus 必填
+2. 检查 toStatus 是否在 `CONTRACT_STATUS_TRANSITIONS[当前状态]` 内
+3. archived 终态不可再流转
+4. comment 选填，最多 500 字符
+5. 校验失败返回 409，附带具体错误信息
+
+### 审批记录
+
+每次状态流转自动调用 `createContractApprovalRecord()` 创建审批记录，记录 fromStatus/toStatus/action/operatorId/comment/operatedAt，按时间倒序展示在详情页时间线中。
+
+### 附件管理
+
+合同详情页通过 `<el-upload>` 组件实现附件上传/删除：
+
+- **上传**：`auto-upload=false`，通过 `on-change` 手动触发 `createContractAttachment()` API；限制 `.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg` 8 种格式，10MB 大小上限
+- **删除**：每项附件显示删除按钮，`ElMessageBox.confirm` 确认后调用 `deleteContractAttachment()`
+- **权限**：需要 `contract:attachment` 权限且合同状态未归档（archived 不可操作）
+- **后端校验** `validateContractAttachmentInput()`：
+  1. 合同必须存在
+  2. 已归档不可上传
+  3. 文件名不能为空
+  4. 扩展名必须在允许列表内
+  5. 文件大小不能超过 10MB
+
+### 仪表盘到期合同概览
+
+`/dashboard` 首页顶部展示到期合同提醒横幅：
+
+- **已到期**：红色 `el-alert`，显示到期份数和金额
+- **即将到期（30 天内）**：黄色 `el-alert`，显示到期份数和金额
+- 通过 `GET /api/dashboard/contracts/expiring` 获取聚合数据，支持 `?scenario=empty` 测试空状态
+- `contract:view` 权限要求；support/viewer 角色不可见
 
 ## 构建
 

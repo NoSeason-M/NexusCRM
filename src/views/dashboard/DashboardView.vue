@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getDashboardSummary, getSalesFunnel, getContractTrend, getTicketStatus } from '@/api/dashboard'
+import { getDashboardSummary, getSalesFunnel, getContractTrend, getTicketStatus, getDashboardExpiringContracts } from '@/api/dashboard'
 import { formatNumber, formatCurrency } from '@/utils/format'
 import MetricCard from './components/MetricCard.vue'
 import TodoList from './components/TodoList.vue'
@@ -10,6 +10,22 @@ import { buildFunnelOption, buildTrendOption, buildPieOption } from './chartOpti
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
+
+// ─── 到期合同概览 ───
+const expiringData = ref(null)
+const expiringLoading = ref(false)
+
+async function fetchExpiringContracts() {
+  expiringLoading.value = true
+  try {
+    const res = await getDashboardExpiringContracts()
+    expiringData.value = res.data
+  } catch {
+    expiringData.value = null
+  } finally {
+    expiringLoading.value = false
+  }
+}
 
 // ─── 概览指标 ───
 const summary = ref(null)
@@ -91,6 +107,7 @@ const ticketOption = computed(() => {
 onMounted(() => {
   fetchSummary()
   fetchCharts()
+  fetchExpiringContracts()
 })
 </script>
 
@@ -189,6 +206,24 @@ onMounted(() => {
             />
           </div>
         </div>
+      </div>
+
+      <!-- 到期合同提醒横幅 -->
+      <div v-if="expiringData && (expiringData.expiring.count > 0 || expiringData.expired.count > 0)" class="expiring-section">
+        <el-alert
+          v-if="expiringData.expired.count > 0"
+          :title="`有 ${expiringData.expired.count} 份合同已到期（${formatCurrency(expiringData.expired.amount)}），请尽快处理`"
+          type="error"
+          show-icon
+          :closable="false"
+        />
+        <el-alert
+          v-if="expiringData.expiring.count > 0"
+          :title="`有 ${expiringData.expiring.count} 份合同即将在 30 天内到期（${formatCurrency(expiringData.expiring.amount)}），请关注`"
+          type="warning"
+          show-icon
+          :closable="false"
+        />
       </div>
 
       <!-- 待办与跟进双栏布局 -->
@@ -319,6 +354,13 @@ onMounted(() => {
   @media (max-width: 1200px) {
     grid-template-columns: 1fr;
   }
+}
+
+.expiring-section {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .activity-col {

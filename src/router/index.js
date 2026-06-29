@@ -53,7 +53,13 @@ const routes = [
         path: 'contracts',
         name: 'Contracts',
         meta: { title: '合同管理', requiresAuth: true, roles: ['admin', 'manager', 'sales'] },
-        component: () => import('@/views/common/ModulePlaceholderView.vue')
+        component: () => import('@/views/contracts/ContractListView.vue')
+      },
+      {
+        path: 'contracts/:id',
+        name: 'ContractDetail',
+        meta: { title: '合同详情', requiresAuth: true, roles: ['admin', 'manager', 'sales'] },
+        component: () => import('@/views/contracts/ContractDetailView.vue')
       },
       {
         path: 'tickets',

@@ -71,3 +71,12 @@ export function getContractTrend(config) {
 export function getTicketStatus(config) {
   return request.get('/dashboard/charts/ticket-status', config)
 }
+
+/**
+ * 获取仪表盘到期合同概览（首页到期提醒）
+ * @param {Object} config - 可选配置
+ * @returns {Promise}
+ */
+export function getDashboardExpiringContracts(config) {
+  return request.get('/dashboard/contracts/expiring', config)
+}

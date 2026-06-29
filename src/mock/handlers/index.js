@@ -23,8 +23,24 @@ import {
   createDashboardSummary,
   createSalesFunnel,
   createContractTrend,
-  createTicketStatusDistribution
+  createTicketStatusDistribution,
+  getDashboardExpiringContracts
 } from '../database/dashboard'
+import {
+  queryContracts,
+  getContractOptions,
+  createContractStatistics,
+  getExpiringContracts,
+  validateContractInput,
+  validateContractStatusTransition,
+  createContractApprovalRecord,
+  getContractDetail,
+  getAllowedContractStatusTransitions,
+  getContractTransitionPermission,
+  validateContractAttachmentInput,
+  createContractAttachment,
+  canManageContractAttachments
+} from '../database/contracts'
 
 /**
  * 统一响应格式
@@ -926,5 +942,358 @@ export const handlers = [
     const store = getStore()
     const board = createOpportunityBoard(store)
     return success(board)
+  }),
+
+  // ──── 合同管理接口 ────
+
+  // GET /api/contracts — 组合查询 + 分页合同列表
+  http.get('/api/contracts', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:view') && !perms.includes('*')) {
+      return fail('无权限查看合同', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = queryContracts(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/contracts/options — 合同筛选选项
+  http.get('/api/contracts/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const store = getStore()
+    const options = getContractOptions(store)
+    return success(options)
+  }),
+
+  // GET /api/contracts/statistics — 合同统计概览
+  http.get('/api/contracts/statistics', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:view') && !perms.includes('*')) {
+      return fail('无权限查看合同统计', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const statistics = createContractStatistics(store, searchParams)
+    return success(statistics)
+  }),
+
+  // GET /api/contracts/expiring — 到期合同列表
+  http.get('/api/contracts/expiring', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:view') && !perms.includes('*')) {
+      return fail('无权限查看合同', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const days = parseInt(url.searchParams.get('days'), 10) || 30
+    const limit = parseInt(url.searchParams.get('limit'), 10) || 10
+    const store = getStore()
+    const expiring = getExpiringContracts(store, days, limit)
+    return success(expiring)
+  }),
+
+  // GET /api/contracts/:id — 合同详情
+  http.get('/api/contracts/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:view') && !perms.includes('*')) {
+      return fail('无权限查看合同', 1006, 403)
+    }
+
+    const store = getStore()
+    const detail = getContractDetail(store, params.id)
+    if (!detail) return fail('合同不存在', 1005, 404)
+    return success(detail)
+  }),
+
+  // POST /api/contracts — 新建合同
+  http.post('/api/contracts', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:create') && !perms.includes('*')) {
+      return fail('无权限新建合同', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    const { valid, errors, data } = validateContractInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 自动生成 contractNo
+    const lastContract = store.contracts[store.contracts.length - 1]
+    let nextNum = 20260001
+    if (lastContract && lastContract.contractNo) {
+      const num = parseInt(lastContract.contractNo.replace('CT-', ''), 10)
+      if (!Number.isNaN(num)) nextNum = num + 1
+    }
+    const now = new Date().toISOString()
+    const contract = {
+      id: crypto.randomUUID(),
+      contractNo: `CT-${nextNum}`,
+      ...data,
+      status: 'draft',
+      ownerId: data.ownerId || user.id,
+      signedAt: null,
+      createdAt: now,
+      updatedAt: now
+    }
+    store.contracts.unshift(contract)
+
+    // 记录初始审批记录
+    createContractApprovalRecord(store, contract, { toStatus: 'draft', comment: '合同创建' }, user.id)
+
+    return success(contract)
+  }),
+
+  // PUT /api/contracts/:id — 更新合同（禁止修改 status）
+  http.put('/api/contracts/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:edit') && !perms.includes('*')) {
+      return fail('无权限编辑合同', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.contracts.findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('合同不存在', 1005, 404)
+
+    const existing = store.contracts[idx]
+
+    // 只有 draft 和 rejected 状态允许编辑
+    if (existing.status !== 'draft' && existing.status !== 'rejected') {
+      return fail('当前状态不允许编辑合同，仅草稿和已驳回状态可编辑', 1008, 409)
+    }
+
+    const body = await request.json()
+
+    // 禁止修改 status/contractNo
+    const safeBody = { ...body }
+    delete safeBody.status
+    delete safeBody.contractNo
+
+    const { valid, errors, data } = validateContractInput(store, { ...existing, ...safeBody }, existing.id)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    store.contracts[idx] = {
+      ...existing,
+      ...data,
+      id: existing.id,
+      contractNo: existing.contractNo,
+      status: existing.status,
+      createdAt: existing.createdAt,
+      updatedAt: now
+    }
+
+    return success(store.contracts[idx])
+  }),
+
+  // DELETE /api/contracts/:id — 删除合同
+  http.delete('/api/contracts/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:delete') && !perms.includes('*')) {
+      return fail('无权限删除合同', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.contracts.findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('合同不存在', 1005, 404)
+
+    store.contracts.splice(idx, 1)
+
+    // 清理关联的审批记录和附件
+    if (store.contractApprovalRecords) {
+      store.contractApprovalRecords = store.contractApprovalRecords.filter(r => r.contractId !== params.id)
+    }
+    if (store.contractAttachments) {
+      store.contractAttachments = store.contractAttachments.filter(a => a.contractId !== params.id)
+    }
+
+    return success({ message: '合同已删除' })
+  }),
+
+  // PATCH /api/contracts/:id/status — 合同状态流转
+  http.patch('/api/contracts/:id/status', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const store = getStore()
+    const idx = store.contracts.findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('合同不存在', 1005, 404)
+
+    const contract = store.contracts[idx]
+    const body = await request.json()
+
+    // 校验流转
+    const { valid, errors } = validateContractStatusTransition(contract, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 409)
+    }
+
+    // 权限检查（基于目标状态）
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    const requiredPerm = getContractTransitionPermission(body.toStatus)
+    if (!perms.includes(requiredPerm) && !perms.includes('*')) {
+      return fail(`没有权限进行此操作，需要 ${requiredPerm} 权限`, 1006, 403)
+    }
+
+    const now = new Date().toISOString()
+
+    // 更新合同状态
+    store.contracts[idx].status = body.toStatus
+    store.contracts[idx].updatedAt = now
+
+    // 如果签署，设置 signedAt
+    if (body.toStatus === 'signed' && !store.contracts[idx].signedAt) {
+      store.contracts[idx].signedAt = now
+    }
+
+    // 记录审批记录
+    const record = createContractApprovalRecord(store, contract, body, user.id)
+
+    return success({
+      id: store.contracts[idx].id,
+      status: store.contracts[idx].status,
+      signedAt: store.contracts[idx].signedAt,
+      updatedAt: now,
+      record
+    })
+  }),
+
+  // ──── 合同附件接口 ────
+
+  // POST /api/contracts/:id/attachments — 上传附件
+  http.post('/api/contracts/:id/attachments', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:attachment') && !perms.includes('*')) {
+      return fail('没有权限上传合同附件', 1006, 403)
+    }
+
+    const store = getStore()
+    const contract = store.contracts.find(c => c.id === params.id)
+    if (!contract) return fail('合同不存在', 1005, 404)
+
+    // 已归档不可上传
+    if (contract.status === 'archived') {
+      return fail('已归档的合同不可上传附件', 1008, 409)
+    }
+
+    // 解析 multipart 或 JSON 中的文件信息
+    const body = await request.json()
+    const fileInput = body.file || body
+
+    // 校验
+    const { valid, errors } = validateContractAttachmentInput(store, params.id, fileInput)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 创建附件记录
+    if (!store.contractAttachments) store.contractAttachments = []
+    const attachment = createContractAttachment(params.id, fileInput, user.id)
+    store.contractAttachments.push(attachment)
+
+    // 更新合同 updatedAt
+    contract.updatedAt = new Date().toISOString()
+
+    return success(attachment)
+  }),
+
+  // DELETE /api/contracts/:id/attachments/:attachmentId — 删除附件
+  http.delete('/api/contracts/:id/attachments/:attachmentId', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:attachment') && !perms.includes('*')) {
+      return fail('没有权限删除合同附件', 1006, 403)
+    }
+
+    const store = getStore()
+    const contract = store.contracts.find(c => c.id === params.id)
+    if (!contract) return fail('合同不存在', 1005, 404)
+
+    // 已归档不可操作
+    if (contract.status === 'archived') {
+      return fail('已归档的合同不可操作附件', 1008, 409)
+    }
+
+    // 查找附件（同时校验 contractId）
+    if (!store.contractAttachments) store.contractAttachments = []
+    const attIdx = store.contractAttachments.findIndex(
+      a => a.id === params.attachmentId && a.contractId === params.id
+    )
+    if (attIdx === -1) return fail('附件不存在', 1005, 404)
+
+    store.contractAttachments.splice(attIdx, 1)
+
+    // 更新合同 updatedAt
+    contract.updatedAt = new Date().toISOString()
+
+    return success({ message: '附件已删除' })
+  }),
+
+  // ──── Dashboard 到期合同概览 ────
+
+  // GET /api/dashboard/contracts/expiring — 工作台到期合同概览
+  http.get('/api/dashboard/contracts/expiring', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('contract:view') && !perms.includes('*')) {
+      return fail('无权限查看合同', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const scenario = url.searchParams.get('scenario')
+
+    if (scenario === 'error') return fail('模拟服务器错误', -1, 500)
+
+    const store = getStore()
+
+    if (scenario === 'empty') {
+      return success({ expiring: { count: 0, amount: 0 }, expired: { count: 0, amount: 0 } })
+    }
+
+    const data = getDashboardExpiringContracts(store)
+    return success(data)
   })
 ]

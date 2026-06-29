@@ -1,3 +1,5 @@
+import { getContractExpiry } from './contracts'
+
 /**
  * Dashboard 数据聚合层
  *
@@ -128,4 +130,41 @@ export function createTicketStatusDistribution(database) {
   })
 
   return Object.values(grouped)
+}
+
+/**
+ * 获取仪表盘到期合同概览
+ *
+ * 返回即将到期和已到期合同的数量 + 金额统计。
+ * 用于首页顶部到期提醒。
+ *
+ * @param {Object} database - 完整的数据集
+ * @returns {{ expiring: { count: number, amount: number }, expired: { count: number, amount: number } }}
+ */
+export function getDashboardExpiringContracts(database) {
+  const { contracts } = database
+  const now = new Date()
+
+  let expiringCount = 0
+  let expiringAmount = 0
+  let expiredCount = 0
+  let expiredAmount = 0
+
+  for (const c of contracts) {
+    if (c.status === 'archived') continue
+    const { expiryStatus } = getContractExpiry(c, now)
+
+    if (expiryStatus === 'expired') {
+      expiredCount++
+      expiredAmount += Number(c.amount) || 0
+    } else if (expiryStatus === 'expiring') {
+      expiringCount++
+      expiringAmount += Number(c.amount) || 0
+    }
+  }
+
+  return {
+    expiring: { count: expiringCount, amount: expiringAmount },
+    expired: { count: expiredCount, amount: expiredAmount }
+  }
 }

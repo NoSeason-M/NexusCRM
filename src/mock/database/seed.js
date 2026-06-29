@@ -30,8 +30,8 @@ const ROLE_NAMES = {
  */
 export const ROLE_PERMISSIONS = {
   admin:   ['*'],
-  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:approve', 'ticket:view'],
-  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view'],
+  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:edit', 'contract:delete', 'contract:approve', 'contract:attachment', 'ticket:view'],
+  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:attachment'],
   support: ['dashboard:view', 'customer:view', 'customer:follow', 'ticket:view', 'ticket:handle'],
   viewer:  ['dashboard:view', 'customer:view']
 }
@@ -353,31 +353,140 @@ export function generateOpportunityStageRecords(opportunities, _profiles) {
 }
 
 /**
- * 合同状态
+ * 合同状态（完整生命周期）
+ * draft → approving → approved/rejected → signed → archived
  */
-const CONTRACT_STATUSES = ['draft', 'pending_approval', 'active', 'active', 'completed', 'terminated']
+const CONTRACT_STATUSES = ['draft', 'approving', 'approved', 'signed', 'signed', 'archived']
 
 /**
- * 生成合同数据（25~35 条）
- * @param {Array} customers     - 客户列表
- * @param {Array} opportunities - 商机列表
+ * 合同编号前缀
  */
-export function generateContracts(customers, opportunities) {
-  const count = faker.number.int({ min: 25, max: 35 })
+let contractNoCounter = 20260001
+function nextContractNo() {
+  return `CT-${contractNoCounter++}`
+}
+
+/**
+ * 生成合同数据（30 条）
+ * @param {Array} customers     - 客户列表
+ * @param {Array} opportunities - 商机列表（仅取 won 状态的）
+ */
+export function generateContracts(customers, opportunities, profiles) {
+  const count = 30
   const contracts = []
+  // 只取 won 状态的商机用于合同关联
+  const wonOpps = opportunities.filter(o => o.stage === 'won')
+  // 如果 won 商机不够，退而求其次
+  const validOpps = wonOpps.length > 0 ? wonOpps : opportunities
+
   for (let i = 0; i < count; i++) {
+    const status = faker.helpers.arrayElement(CONTRACT_STATUSES)
+    const createdAt = faker.date.between({ from: '2025-06-01', to: new Date() }).toISOString()
+    const signedAt = status === 'signed' || status === 'archived'
+      ? faker.date.between({ from: '2026-01-01', to: new Date() }).toISOString()
+      : null
+    const startDate = faker.date.between({ from: '2026-01-01', to: '2026-06-01' }).toISOString()
+    const endDate = faker.date.between({ from: '2026-07-01', to: '2027-12-31' }).toISOString()
+
     contracts.push({
       id: faker.string.uuid(),
-      title: `${faker.company.buzzNoun()}服务合同`,
+      contractNo: nextContractNo(),
+      name: faker.helpers.arrayElement([
+        `${faker.company.buzzNoun()}系统开发合同`,
+        `${faker.company.buzzNoun()}服务合作协议`,
+        `企业${faker.company.buzzNoun()}解决方案合同`,
+        `${faker.company.buzzVerb()}平台运维合同`,
+        `${faker.company.buzzNoun()}技术咨询合同`,
+        `年度${faker.company.buzzNoun()}服务合同`
+      ]),
       customerId: faker.helpers.arrayElement(customers).id,
-      opportunityId: faker.helpers.arrayElement(opportunities).id,
+      opportunityId: faker.helpers.arrayElement(validOpps).id,
+      ownerId: pickUserId(profiles),
       amount: faker.number.int({ min: 100000, max: 10000000 }),
-      status: faker.helpers.arrayElement(CONTRACT_STATUSES),
-      signedAt: faker.date.between({ from: '2026-01-01', to: new Date() }).toISOString(),
-      createdAt: faker.date.between({ from: '2025-06-01', to: new Date() }).toISOString()
+      status,
+      startDate,
+      endDate,
+      signedAt,
+      description: faker.helpers.arrayElement([
+        '双方经友好协商，达成以下合作条款',
+        '本合同为框架协议，具体项目另行约定',
+        '根据招标结果签订本合同',
+        '续签合同，条款与上一年度一致',
+        '为保障项目顺利实施，特签订本合同'
+      ]),
+      createdAt,
+      updatedAt: faker.date.between({ from: createdAt, to: new Date() }).toISOString()
     })
   }
   return contracts
+}
+
+/**
+ * 生成合同审批记录（每个合同 1~3 条）
+ * @param {Array} contracts - 合同列表
+ * @param {Array} profiles  - 用户档案列表
+ */
+export function generateContractApprovalRecords(contracts, profiles) {
+  const records = []
+  for (const contract of contracts) {
+    const recordCount = contract.status === 'signed' || contract.status === 'archived' ? faker.number.int({ min: 2, max: 3 }) : 1
+
+    for (let i = 0; i < recordCount; i++) {
+      const prevStatus = i === 0 ? null : (contract.status === 'signed' ? ['draft', 'approving', 'approved'][i - 1] : null)
+      const curStatus = contract.status === 'signed'
+        ? ['draft', 'approving', 'approved'][i]
+        : (i === 0 ? contract.status : null)
+
+      if (!curStatus) continue
+
+      records.push({
+        id: faker.string.uuid(),
+        contractId: contract.id,
+        fromStatus: i === 0 ? null : prevStatus,
+        toStatus: curStatus,
+        action: i === 0 ? 'submit' : (curStatus === 'rejected' ? 'reject' : 'approve'),
+        operatorId: pickUserId(profiles),
+        comment: faker.helpers.arrayElement([
+          '合同条款已审核，同意签署',
+          '已确认合作内容，批准',
+          '请补充相关附件资料',
+          '金额过大，需重新评估',
+          '审核通过，安排签署'
+        ]),
+        operatedAt: faker.date.between({ from: contract.createdAt, to: new Date() }).toISOString()
+      })
+    }
+  }
+  return records
+}
+
+/**
+ * 生成合同附件（每个合同 0~3 个）
+ * @param {Array} contracts - 合同列表
+ * @param {Array} profiles  - 用户档案列表
+ */
+export function generateContractAttachments(contracts, profiles) {
+  const attachments = []
+  for (const contract of contracts) {
+    const count = faker.number.int({ min: 0, max: 3 })
+    for (let i = 0; i < count; i++) {
+      attachments.push({
+        id: faker.string.uuid(),
+        contractId: contract.id,
+        name: faker.helpers.arrayElement([
+          '合同扫描件.pdf', '技术方案附件.docx',
+          '报价清单.xlsx', '保密协议.pdf',
+          '验收报告.pdf', '补充协议.docx'
+        ]),
+        type: faker.helpers.arrayElement(['pdf', 'docx', 'xlsx', 'pdf', 'pdf']),
+        size: faker.number.int({ min: 102400, max: 5242880 }),
+        url: `/api/files/contracts/${contract.id}/${i}`,
+        uploadedBy: pickUserId(profiles),
+        uploadedAt: faker.date.between({ from: contract.createdAt, to: new Date() }).toISOString()
+      })
+    }
+  }
+  return attachments
 }
 
 /**
