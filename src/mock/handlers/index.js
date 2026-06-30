@@ -764,6 +764,21 @@ export const handlers = [
     return success(options)
   }),
 
+  // GET /api/opportunities/board — 商机看板（按阶段分组）
+  http.get('/api/opportunities/board', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('opportunity:view') && !perms.includes('*')) {
+      return fail('无权限查看商机', 1006, 403)
+    }
+
+    const store = getStore()
+    const board = createOpportunityBoard(store)
+    return success(board)
+  }),
+
   // GET /api/opportunities/:id — 商机详情
   http.get('/api/opportunities/:id', ({ request, params }) => {
     const user = resolveUser(request.headers.get('Authorization'))
@@ -952,21 +967,6 @@ export const handlers = [
   }),
 
   // ──── 商机看板接口 ────
-
-  // GET /api/opportunities/board — 商机看板（按阶段分组）
-  http.get('/api/opportunities/board', ({ request }) => {
-    const user = resolveUser(request.headers.get('Authorization'))
-    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
-
-    const perms = ROLE_PERMISSIONS[user.role] || []
-    if (!perms.includes('opportunity:view') && !perms.includes('*')) {
-      return fail('无权限查看商机', 1006, 403)
-    }
-
-    const store = getStore()
-    const board = createOpportunityBoard(store)
-    return success(board)
-  }),
 
   // ──── 合同管理接口 ────
 
