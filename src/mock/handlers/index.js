@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import { getStore, resetStore } from '../database/store'
-import { ROLE_MENUS, ROLE_PERMISSIONS } from '../database/seed'
+import { ROLE_MENUS, ROLE_PERMISSIONS, ROLE_NAMES } from '../database/seed'
 import {
   queryCustomers,
   getCustomerOptions,
@@ -41,6 +41,30 @@ import {
   createContractAttachment,
   canManageContractAttachments
 } from '../database/contracts'
+import {
+  queryTickets,
+  getTicketOptions,
+  getTicketDetail,
+  validateTicketInput,
+  createTicket,
+  validateTicketAssignment,
+  assignTicket,
+  validateTicketStatusTransition,
+  transitionTicketStatus,
+  validateTicketRecordInput,
+  persistTicketOperation
+} from '../database/tickets'
+import {
+  querySystemUsers,
+  getSystemUserOptions,
+  validateSystemUserInput,
+  validateSystemUserStatus,
+  getSystemRoles,
+  getSystemMenus as getSystemMenusTree,
+  querySystemLogs,
+  LOG_MODULES,
+  createOperationLogEntry
+} from '../database/system'
 
 /**
  * 统一响应格式
@@ -1295,5 +1319,456 @@ export const handlers = [
 
     const data = getDashboardExpiringContracts(store)
     return success(data)
+  }),
+
+  // ──── 工单管理接口 ────
+
+  // GET /api/tickets — 组合查询 + 分页工单列表
+  http.get('/api/tickets', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:view') && !perms.includes('*')) {
+      return fail('无权限查看工单', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = queryTickets(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/tickets/options — 工单筛选选项
+  http.get('/api/tickets/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:view') && !perms.includes('*')) {
+      return fail('无权限查看工单', 1006, 403)
+    }
+
+    const store = getStore()
+    const options = getTicketOptions(store)
+    return success(options)
+  }),
+
+  // GET /api/tickets/:id — 工单详情
+  http.get('/api/tickets/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:view') && !perms.includes('*')) {
+      return fail('无权限查看工单', 1006, 403)
+    }
+
+    const store = getStore()
+    const detail = getTicketDetail(store, params.id)
+    if (!detail) return fail('工单不存在', 1005, 404)
+    return success(detail)
+  }),
+
+  // POST /api/tickets — 新建工单
+  http.post('/api/tickets', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:create') && !perms.includes('*')) {
+      return fail('无权限创建工单', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    // 校验
+    const { valid, errors, data } = validateTicketInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 创建工单
+    const { ticket, record } = createTicket(store, data, user.id)
+
+    // 持久化
+    persistTicketOperation(store, { ticket, record })
+
+    return success({
+      id: ticket.id,
+      ticketNo: ticket.ticketNo,
+      status: ticket.status,
+      createdAt: ticket.createdAt
+    })
+  }),
+
+  // PATCH /api/tickets/:id/assign — 分配工单
+  http.patch('/api/tickets/:id/assign', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:handle') && !perms.includes('*')) {
+      return fail('没有权限处理工单', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.tickets.findIndex(t => t.id === params.id)
+    if (idx === -1) return fail('工单不存在', 1005, 404)
+
+    const ticket = store.tickets[idx]
+
+    // 已关闭不可分配
+    if (ticket.status === 'closed') {
+      return fail('已关闭的工单不可分配', 1008, 409)
+    }
+
+    const body = await request.json()
+
+    // 校验分配
+    const { valid, errors } = validateTicketAssignment(store, ticket, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 执行分配
+    const result = assignTicket(store, ticket, body, user.id)
+
+    // 持久化记录
+    persistTicketOperation(store, { record: result.record })
+
+    return success({
+      id: ticket.id,
+      assigneeId: ticket.assigneeId,
+      status: ticket.status,
+      updatedAt: ticket.updatedAt
+    })
+  }),
+
+  // PATCH /api/tickets/:id/status — 工单状态流转
+  http.patch('/api/tickets/:id/status', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:handle') && !perms.includes('*')) {
+      return fail('没有权限处理工单', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = store.tickets.findIndex(t => t.id === params.id)
+    if (idx === -1) return fail('工单不存在', 1005, 404)
+
+    const ticket = store.tickets[idx]
+    const body = await request.json()
+
+    // 校验流转
+    const { valid, errors } = validateTicketStatusTransition(ticket, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 409)
+    }
+
+    // 执行流转
+    const result = transitionTicketStatus(store, ticket, body, user.id)
+
+    // 持久化记录
+    persistTicketOperation(store, { record: result.record })
+
+    return success({
+      id: ticket.id,
+      status: ticket.status,
+      resolvedAt: ticket.resolvedAt,
+      closedAt: ticket.closedAt,
+      updatedAt: ticket.updatedAt
+    })
+  }),
+
+  // POST /api/tickets/:id/records — 添加工单跟进记录（备注）
+  http.post('/api/tickets/:id/records', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('ticket:handle') && !perms.includes('*')) {
+      return fail('没有权限处理工单', 1006, 403)
+    }
+
+    const store = getStore()
+    const ticket = store.tickets.find(t => t.id === params.id)
+    if (!ticket) return fail('工单不存在', 1005, 404)
+
+    const body = await request.json()
+
+    // 校验
+    const { valid, errors } = validateTicketRecordInput(body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const record = {
+      id: crypto.randomUUID(),
+      ticketId: params.id,
+      type: 'note',
+      fromStatus: null,
+      toStatus: null,
+      operatorId: user.id,
+      content: body.content.trim(),
+      createdAt: new Date().toISOString()
+    }
+
+    persistTicketOperation(store, { record })
+
+    return success(record)
+  }),
+
+  // ──── 系统管理接口 ────
+
+  // GET /api/system/users — 系统用户列表
+  http.get('/api/system/users', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:user:view') && !perms.includes('*')) {
+      return fail('无权限查看系统用户', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = querySystemUsers(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/system/users/options — 系统用户筛选选项
+  http.get('/api/system/users/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:user:view') && !perms.includes('*')) {
+      return fail('无权限查看系统用户', 1006, 403)
+    }
+
+    const store = getStore()
+    const options = getSystemUserOptions(store)
+    return success(options)
+  }),
+
+  // POST /api/system/users — 新建系统用户
+  http.post('/api/system/users', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:user:manage') && !perms.includes('*')) {
+      return fail('无权限管理系统用户', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    const { valid, errors, data } = validateSystemUserInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    const newUser = {
+      id: crypto.randomUUID(),
+      ...data,
+      status: 'active',
+      roleName: ROLE_NAMES[data.role] || data.role,
+      lastLoginAt: null,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    if (!store.systemUsers) store.systemUsers = []
+    store.systemUsers.unshift(newUser)
+
+    // 记录操作日志
+    createOperationLogEntry(store, {
+      operatorId: user.id,
+      module: 'system',
+      action: 'create',
+      targetType: 'user',
+      targetId: newUser.id,
+      content: `创建用户 ${newUser.username}`,
+      result: 'success'
+    })
+
+    return success(newUser)
+  }),
+
+  // PUT /api/system/users/:id — 更新系统用户
+  http.put('/api/system/users/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:user:manage') && !perms.includes('*')) {
+      return fail('无权限管理系统用户', 1006, 403)
+    }
+
+    const store = getStore()
+    const allUsers = [...(store.profiles || []), ...(store.systemUsers || [])]
+    const idx = allUsers.findIndex(u => u.id === params.id)
+    const target = allUsers[idx]
+
+    if (!target) return fail('用户不存在', 1005, 404)
+
+    const body = await request.json()
+    const { valid, errors, data } = validateSystemUserInput(store, body, params.id)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 如果是 systemUsers 中的用户，更新它
+    const sysIdx = store.systemUsers ? store.systemUsers.findIndex(u => u.id === params.id) : -1
+    if (sysIdx !== -1) {
+      const now = new Date().toISOString()
+      store.systemUsers[sysIdx] = {
+        ...store.systemUsers[sysIdx],
+        ...data,
+        roleName: ROLE_NAMES[data.role] || data.role,
+        updatedAt: now
+      }
+
+      createOperationLogEntry(store, {
+        operatorId: user.id,
+        module: 'system',
+        action: 'update',
+        targetType: 'user',
+        targetId: params.id,
+        content: `更新用户 ${data.username}`,
+        result: 'success'
+      })
+
+      return success(store.systemUsers[sysIdx])
+    }
+
+    return fail('预设用户不可编辑', 1007, 400)
+  }),
+
+  // PATCH /api/system/users/:id/status — 变更用户状态
+  http.patch('/api/system/users/:id/status', async ({ request, params }) => {
+    const operator = resolveUser(request.headers.get('Authorization'))
+    if (!operator) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[operator.role] || []
+    if (!perms.includes('system:user:manage') && !perms.includes('*')) {
+      return fail('无权限管理系统用户', 1006, 403)
+    }
+
+    const store = getStore()
+    const allUsers = [...(store.profiles || []), ...(store.systemUsers || [])]
+    const target = allUsers.find(u => u.id === params.id)
+
+    if (!target) return fail('用户不存在', 1005, 404)
+
+    const body = await request.json()
+
+    const { valid, errors } = validateSystemUserStatus(target, body, operator.id)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 409)
+    }
+
+    const sysIdx = store.systemUsers ? store.systemUsers.findIndex(u => u.id === params.id) : -1
+    if (sysIdx !== -1) {
+      store.systemUsers[sysIdx].status = body.status
+      store.systemUsers[sysIdx].updatedAt = new Date().toISOString()
+
+      createOperationLogEntry(store, {
+        operatorId: operator.id,
+        module: 'system',
+        action: 'status',
+        targetType: 'user',
+        targetId: params.id,
+        content: `${body.status === 'disabled' ? '禁用' : '启用'}用户 ${target.username}`,
+        result: 'success'
+      })
+
+      return success({
+        id: params.id,
+        status: body.status,
+        updatedAt: store.systemUsers[sysIdx].updatedAt
+      })
+    }
+
+    return fail('预设用户状态不可变更', 1007, 400)
+  }),
+
+  // GET /api/system/roles — 角色列表
+  http.get('/api/system/roles', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:role:view') && !perms.includes('*')) {
+      return fail('无权限查看角色', 1006, 403)
+    }
+
+    const store = getStore()
+    const roles = getSystemRoles(store)
+    return success(roles)
+  }),
+
+  // GET /api/system/menus — 菜单树
+  http.get('/api/system/menus', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:menu:view') && !perms.includes('*')) {
+      return fail('无权限查看菜单', 1006, 403)
+    }
+
+    const store = getStore()
+    const menus = getSystemMenusTree(store)
+    return success(menus)
+  }),
+
+  // GET /api/system/logs — 操作日志列表
+  http.get('/api/system/logs', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:log:view') && !perms.includes('*')) {
+      return fail('无权限查看操作日志', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = querySystemLogs(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/system/logs/options — 操作日志筛选选项
+  http.get('/api/system/logs/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('system:log:view') && !perms.includes('*')) {
+      return fail('无权限查看操作日志', 1006, 403)
+    }
+
+    const store = getStore()
+    const modules = LOG_MODULES.map(m => ({ value: m.module, label: m.label }))
+    const operators = (store.profiles || []).map(p => ({ id: p.id, name: p.name }))
+
+    return success({ modules, operators })
   })
 ]

@@ -17,7 +17,7 @@ export const PRESET_ACCOUNTS = [
 /**
  * 角色中文名映射
  */
-const ROLE_NAMES = {
+export const ROLE_NAMES = {
   admin: '超级管理员',
   manager: '经理',
   sales: '销售',
@@ -30,7 +30,7 @@ const ROLE_NAMES = {
  */
 export const ROLE_PERMISSIONS = {
   admin:   ['*'],
-  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:edit', 'contract:delete', 'contract:approve', 'contract:attachment', 'ticket:view'],
+  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:edit', 'contract:delete', 'contract:approve', 'contract:attachment', 'ticket:view', 'ticket:create', 'ticket:handle', 'system:user:view', 'system:role:view', 'system:menu:view', 'system:log:view'],
   sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:attachment'],
   support: ['dashboard:view', 'customer:view', 'customer:follow', 'ticket:view', 'ticket:handle'],
   viewer:  ['dashboard:view', 'customer:view']
@@ -46,8 +46,19 @@ export const ROLE_MENUS = {
     { path: '/opportunities', title: '商机管理', shortLabel: '机', icon: 'TrendCharts' },
     { path: '/contracts', title: '合同管理', shortLabel: '同', icon: 'Document' },
     { path: '/tickets', title: '工单管理', shortLabel: '单', icon: 'Ticket' },
-    { path: '/api-docs', title: '接口文档', shortLabel: '档', icon: 'Document' },
-    { path: '/settings', title: '系统设置', shortLabel: '设', icon: 'Setting' }
+    {
+      path: '/system/users',
+      title: '系统管理',
+      shortLabel: '系',
+      icon: 'Setting',
+      children: [
+        { path: '/system/users', title: '用户管理', shortLabel: '用', icon: 'UserFilled' },
+        { path: '/system/roles', title: '角色管理', shortLabel: '角', icon: 'Avatar' },
+        { path: '/system/menus', title: '菜单管理', shortLabel: '菜', icon: 'Menu' },
+        { path: '/system/logs', title: '操作日志', shortLabel: '日', icon: 'List' }
+      ]
+    },
+    { path: '/api-docs', title: '接口文档', shortLabel: '档', icon: 'Document' }
   ],
   manager: [
     { path: '/dashboard', title: '仪表盘', shortLabel: '盘', icon: 'Odometer' },
@@ -490,40 +501,235 @@ export function generateContractAttachments(contracts, profiles) {
 }
 
 /**
- * 工单优先级
+ * 工单优先级（含权重）
  */
 const TICKET_PRIORITIES = ['low', 'medium', 'medium', 'high', 'urgent']
 
 /**
- * 工单状态
+ * 工单状态（完整生命周期）
+ * pending → processing → pending_confirmation → resolved → closed
  */
-const TICKET_STATUSES = ['open', 'open', 'in_progress', 'pending', 'resolved', 'closed']
+const TICKET_STATUSES = ['pending', 'pending', 'processing', 'pending_confirmation', 'resolved', 'closed']
 
 /**
- * 生成工单数据（20~25 条）
+ * 工单类型
+ */
+const ISSUE_TYPES = ['system_bug', 'feature_request', 'data_issue', 'account_issue', 'consultation', 'complaint']
+
+/**
+ * 工单类型中文名
+ */
+export const ISSUE_TYPE_LABELS = {
+  system_bug: '系统故障',
+  feature_request: '功能需求',
+  data_issue: '数据问题',
+  account_issue: '账号问题',
+  consultation: '咨询建议',
+  complaint: '投诉反馈'
+}
+
+/**
+ * 工单状态中文名
+ */
+export const TICKET_STATUS_LABELS = {
+  pending: '待处理',
+  processing: '处理中',
+  pending_confirmation: '待确认',
+  resolved: '已解决',
+  closed: '已关闭'
+}
+
+/**
+ * 工单状态类型（用于标签配色）
+ */
+export const TICKET_STATUS_TYPES = {
+  pending: 'danger',
+  processing: 'warning',
+  pending_confirmation: 'primary',
+  resolved: 'info',
+  closed: 'success'
+}
+
+/**
+ * 工单优先级中文名
+ */
+export const TICKET_PRIORITY_LABELS = {
+  low: '低',
+  medium: '中',
+  high: '高',
+  urgent: '紧急'
+}
+
+/**
+ * 工单优先级类型（用于标签配色）
+ */
+export const TICKET_PRIORITY_TYPES = {
+  low: 'info',
+  medium: '',
+  high: 'warning',
+  urgent: 'danger'
+}
+
+/**
+ * 工单编号自增
+ */
+let ticketNoCounter = 20260001
+function nextTicketNo() {
+  return `TK-${ticketNoCounter++}`
+}
+
+/**
+ * 生成工单数据（32 条）
  * @param {Array} customers - 客户列表
- * @param {Array} profiles  - 用户档案列表（用于 assigneeId）
+ * @param {Array} profiles  - 用户档案列表
  */
 export function generateTickets(customers, profiles) {
-  const count = faker.number.int({ min: 20, max: 25 })
+  const count = 32
   const tickets = []
   for (let i = 0; i < count; i++) {
+    const status = faker.helpers.arrayElement(TICKET_STATUSES)
+    const createdAt = faker.date.between({ from: '2026-03-01', to: new Date() }).toISOString()
+    const resolvedAt = status === 'resolved' || status === 'closed'
+      ? faker.date.between({ from: createdAt, to: new Date() }).toISOString()
+      : null
+    const closedAt = status === 'closed'
+      ? faker.date.between({ from: resolvedAt || createdAt, to: new Date() }).toISOString()
+      : null
+
+    // 部分工单未分配负责人
+    const hasAssignee = faker.helpers.arrayElement([true, true, false])
+    const assigneeId = hasAssignee ? pickUserId(profiles) : null
+
     tickets.push({
       id: faker.string.uuid(),
+      ticketNo: nextTicketNo(),
       title: faker.helpers.arrayElement([
         '系统无法登录', '数据导出失败', '页面加载缓慢',
         '报表数据不一致', 'API 接口超时', '账号权限异常',
         '邮件通知未收到', '功能使用咨询', '数据备份申请',
-        '性能优化需求'
+        '性能优化需求', '客户信息无法编辑', '合同模板错误',
+        '审批流程卡住', '密码重置失败', '搜索功能异常',
+        '移动端适配问题'
       ]),
       customerId: faker.helpers.arrayElement(customers).id,
-      assigneeId: pickUserId(profiles),
+      issueType: faker.helpers.arrayElement(ISSUE_TYPES),
       priority: faker.helpers.arrayElement(TICKET_PRIORITIES),
-      status: faker.helpers.arrayElement(TICKET_STATUSES),
-      createdAt: faker.date.between({ from: '2026-03-01', to: new Date() }).toISOString()
+      status,
+      description: faker.helpers.arrayElement([
+        '用户反馈系统无法正常登录，提示账号异常',
+        '导出大量数据时系统响应缓慢，超时中断',
+        '页面加载时间超过 10 秒，影响正常使用',
+        '报表数据与预期不符，部分字段缺失',
+        '接口调用频繁超时，需要排查原因',
+        '员工账号权限配置异常，无法访问模块'
+      ]),
+      creatorId: pickUserId(profiles),
+      assigneeId,
+      createdAt,
+      updatedAt: faker.date.between({ from: createdAt, to: new Date() }).toISOString(),
+      resolvedAt,
+      closedAt
     })
   }
   return tickets
+}
+
+/**
+ * 生成工单操作记录
+ * 根据工单当前状态生成不同数量的记录：
+ *   pending: create
+ *   processing: create → assign
+ *   pending_confirmation: create → assign → status
+ *   resolved: create → assign → status → status
+ *   closed: create → assign → status → status → status
+ * @param {Array} tickets - 工单列表
+ * @param {Array} profiles - 用户档案列表
+ */
+export function generateTicketRecords(tickets, profiles) {
+  const records = []
+  const statusOrder = ['pending', 'processing', 'pending_confirmation', 'resolved', 'closed']
+
+  for (const ticket of tickets) {
+    const currentIdx = statusOrder.indexOf(ticket.status)
+
+    // 创建记录
+    records.push({
+      id: faker.string.uuid(),
+      ticketId: ticket.id,
+      type: 'create',
+      fromStatus: null,
+      toStatus: 'pending',
+      operatorId: ticket.creatorId,
+      content: '创建工单',
+      createdAt: ticket.createdAt
+    })
+
+    if (currentIdx < 1) continue
+
+    // 分配记录
+    const assignAt = faker.date.between({ from: ticket.createdAt, to: new Date() }).toISOString()
+    records.push({
+      id: faker.string.uuid(),
+      ticketId: ticket.id,
+      type: 'assign',
+      fromStatus: 'pending',
+      toStatus: 'processing',
+      operatorId: ticket.assigneeId || ticket.creatorId,
+      content: '分配工单给处理人',
+      createdAt: assignAt
+    })
+
+    if (currentIdx < 2) continue
+
+    // 第一次状态变更 → pending_confirmation
+    const statusAt1 = faker.date.between({ from: assignAt, to: new Date() }).toISOString()
+    records.push({
+      id: faker.string.uuid(),
+      ticketId: ticket.id,
+      type: 'status',
+      fromStatus: 'processing',
+      toStatus: 'pending_confirmation',
+      operatorId: ticket.assigneeId || ticket.creatorId,
+      content: faker.helpers.arrayElement([
+        '问题已修复，请确认',
+        '已处理完成，待客户确认',
+        '技术问题已解决，请验证'
+      ]),
+      createdAt: statusAt1
+    })
+
+    if (currentIdx < 3) continue
+
+    // 第二次状态变更 → resolved
+    const statusAt2 = faker.date.between({ from: statusAt1, to: new Date() }).toISOString()
+    records.push({
+      id: faker.string.uuid(),
+      ticketId: ticket.id,
+      type: 'status',
+      fromStatus: 'pending_confirmation',
+      toStatus: 'resolved',
+      operatorId: ticket.creatorId,
+      content: '客户确认问题已解决',
+      createdAt: statusAt2
+    })
+
+    if (currentIdx < 4) continue
+
+    // 第三次状态变更 → closed
+    const statusAt3 = faker.date.between({ from: statusAt2, to: new Date() }).toISOString()
+    records.push({
+      id: faker.string.uuid(),
+      ticketId: ticket.id,
+      type: 'status',
+      fromStatus: 'resolved',
+      toStatus: 'closed',
+      operatorId: ticket.creatorId,
+      content: '工单关闭，归档处理',
+      createdAt: statusAt3
+    })
+  }
+
+  return records
 }
 
 /**

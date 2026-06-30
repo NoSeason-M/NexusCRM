@@ -65,13 +65,37 @@ const routes = [
         path: 'tickets',
         name: 'Tickets',
         meta: { title: '工单管理', requiresAuth: true, roles: ['admin', 'manager', 'support'] },
-        component: () => import('@/views/common/ModulePlaceholderView.vue')
+        component: () => import('@/views/tickets/TicketListView.vue')
       },
       {
-        path: 'settings',
-        name: 'Settings',
-        meta: { title: '系统设置', requiresAuth: true, roles: ['admin'] },
-        component: () => import('@/views/common/ModulePlaceholderView.vue')
+        path: 'tickets/:id',
+        name: 'TicketDetail',
+        meta: { title: '工单详情', requiresAuth: true, roles: ['admin', 'manager', 'support'] },
+        component: () => import('@/views/tickets/TicketDetailView.vue')
+      },
+      {
+        path: 'system/users',
+        name: 'SystemUsers',
+        meta: { title: '用户管理', requiresAuth: true, roles: ['admin'], permission: 'system:user:view' },
+        component: () => import('@/views/system/users/SystemUserListView.vue')
+      },
+      {
+        path: 'system/roles',
+        name: 'SystemRoles',
+        meta: { title: '角色管理', requiresAuth: true, roles: ['admin'], permission: 'system:role:view' },
+        component: () => import('@/views/system/roles/SystemRoleListView.vue')
+      },
+      {
+        path: 'system/menus',
+        name: 'SystemMenus',
+        meta: { title: '菜单管理', requiresAuth: true, roles: ['admin'], permission: 'system:menu:view' },
+        component: () => import('@/views/system/menus/SystemMenuTreeView.vue')
+      },
+      {
+        path: 'system/logs',
+        name: 'SystemLogs',
+        meta: { title: '操作日志', requiresAuth: true, roles: ['admin'], permission: 'system:log:view' },
+        component: () => import('@/views/system/logs/SystemLogListView.vue')
       },
       {
         path: 'api-docs',
@@ -130,6 +154,14 @@ router.beforeEach(async (to, _from, next) => {
   const allowedRoles = to.meta?.roles
   if (allowedRoles && Array.isArray(allowedRoles) && allowedRoles.length > 0) {
     if (!userStore.role || !allowedRoles.includes(userStore.role)) {
+      return next('/forbidden')
+    }
+  }
+
+  // 5. 权限检查（meta.permission）
+  const requiredPerm = to.meta?.permission
+  if (requiredPerm) {
+    if (!userStore.hasPermission(requiredPerm)) {
       return next('/forbidden')
     }
   }

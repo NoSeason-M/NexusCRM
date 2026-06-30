@@ -10,7 +10,11 @@ import {
   TrendCharts,
   Document,
   Ticket,
-  Setting
+  Setting,
+  UserFilled,
+  Avatar,
+  Menu,
+  List
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -27,7 +31,11 @@ const iconMap = {
   TrendCharts,
   Document,
   Ticket,
-  Setting
+  Setting,
+  UserFilled,
+  Avatar,
+  Menu,
+  List
 }
 
 function handleMenuClick(item) {
@@ -45,7 +53,7 @@ function handleMenuClick(item) {
       <span class="logo-short" v-else>NC</span>
     </div>
 
-    <!-- 动态菜单列表 -->
+    <!-- 动态菜单列表（支持子菜单） -->
     <el-menu
       :default-active="route.path"
       :collapse="isCollapsed"
@@ -55,20 +63,45 @@ function handleMenuClick(item) {
       active-text-color="#409eff"
       class="sidebar-menu"
     >
-      <el-menu-item
-        v-for="item in menus"
-        :key="item.path"
-        :index="item.path"
-        :disabled="item.disabled"
-        @click="handleMenuClick(item)"
-      >
-        <el-icon>
-          <component :is="iconMap[item.icon]" />
-        </el-icon>
-        <template #title>
-          <span>{{ item.title }}</span>
-        </template>
-      </el-menu-item>
+      <template v-for="item in menus" :key="item.path">
+        <!-- 有子菜单 -->
+        <el-sub-menu v-if="item.children && item.children.length" :index="item.path">
+          <template #title>
+            <el-icon v-if="item.icon">
+              <component :is="iconMap[item.icon]" />
+            </el-icon>
+            <span>{{ item.title }}</span>
+          </template>
+          <el-menu-item
+            v-for="child in item.children"
+            :key="child.path"
+            :index="child.path"
+            @click="handleMenuClick(child)"
+          >
+            <el-icon v-if="child.icon">
+              <component :is="iconMap[child.icon]" />
+            </el-icon>
+            <template #title>
+              <span>{{ child.title }}</span>
+            </template>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <!-- 无子菜单 -->
+        <el-menu-item
+          v-else
+          :index="item.path"
+          :disabled="item.disabled"
+          @click="handleMenuClick(item)"
+        >
+          <el-icon v-if="item.icon">
+            <component :is="iconMap[item.icon]" />
+          </el-icon>
+          <template #title>
+            <span>{{ item.title }}</span>
+          </template>
+        </el-menu-item>
+      </template>
     </el-menu>
   </div>
 </template>

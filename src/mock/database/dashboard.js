@@ -34,9 +34,9 @@ export function createDashboardSummary(database) {
   // 合同总额（所有合同金额之和）
   const contractAmount = contracts.reduce((sum, c) => sum + (Number(c.amount) || 0), 0)
 
-  // 待处理工单（status === 'pending' 或 'open'）
+  // 待处理工单（status === 'pending'）
   const pendingTicketCount = tickets.filter(
-    t => t.status === 'pending' || t.status === 'open'
+    t => t.status === 'pending'
   ).length
 
   return {
@@ -114,9 +114,9 @@ export function createTicketStatusDistribution(database) {
   const { tickets } = database
 
   const statusMap = {
-    open: '待处理',
-    in_progress: '处理中',
-    pending: '待反馈',
+    pending: '待处理',
+    processing: '处理中',
+    pending_confirmation: '待确认',
     resolved: '已解决',
     closed: '已关闭'
   }

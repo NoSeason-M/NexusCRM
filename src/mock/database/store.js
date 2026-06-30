@@ -9,15 +9,22 @@ import {
   generateContractApprovalRecords,
   generateContractAttachments,
   generateTickets,
+  generateTicketRecords,
   generateDocuments,
   generateTodos,
   generateRecentFollows
 } from './seed'
+import {
+  generateSystemUsers,
+  generateSystemRoles,
+  generateSystemMenus,
+  generateOperationLogs
+} from './system'
 
 const STORAGE_KEY = 'nexus-crm-mock-data'
 
 /** 数据版本号，用于增量迁移 */
-export const DATABASE_VERSION = 8
+export const DATABASE_VERSION = 10
 
 /**
  * 从 localStorage 加载数据，不存在或不完整则返回 null（触发 reset）
@@ -57,11 +64,21 @@ function reset() {
   const contractApprovalRecords = generateContractApprovalRecords(contracts, profiles)
   const contractAttachments = generateContractAttachments(contracts, profiles)
   const tickets = generateTickets(customers, profiles)
+  const ticketRecords = generateTicketRecords(tickets, profiles)
   const documents = generateDocuments(profiles)
 
   const todos = generateTodos(customers, profiles)
   const recentFollows = generateRecentFollows(customers, profiles)
   const opportunityStageRecords = generateOpportunityStageRecords(opportunities, profiles)
+
+  // 系统管理数据
+  const systemUsers = generateSystemUsers(profiles)
+  const operationLogs = generateOperationLogs(profiles)
+
+  // 构建完整数据库用于角色 userCount
+  const tempDb = { profiles, systemUsers }
+  const systemRoles = generateSystemRoles(tempDb)
+  const systemMenus = generateSystemMenus()
 
   const data = {
     version: DATABASE_VERSION,
@@ -78,10 +95,16 @@ function reset() {
     contractApprovalRecords,
     contractAttachments,
     tickets,
+    ticketRecords,
     documents,
     todos,
     recentFollows,
-    opportunityStageRecords
+    opportunityStageRecords,
+    // 系统管理数据
+    systemUsers,
+    systemRoles,
+    systemMenus,
+    operationLogs
   }
   save(data)
   return data
