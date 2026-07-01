@@ -7,7 +7,8 @@ import {
   getCustomerDetail,
   validateCustomerInput,
   getCustomerDeleteConflict,
-  validateFollowRecordInput
+  validateFollowRecordInput,
+  createLeadConversion
 } from '../database/customers'
 import {
   queryOpportunities,
@@ -65,6 +66,23 @@ import {
   LOG_MODULES,
   createOperationLogEntry
 } from '../database/system'
+import {
+  queryMarketingCampaigns,
+  getMarketingCampaignOptions,
+  getMarketingCampaignDetail,
+  getMarketingStatistics,
+  validateMarketingCampaignInput,
+  getMarketingAnalysisData
+} from '../database/marketing'
+import {
+  queryLeads,
+  getLeadOptions,
+  getLeadDetail,
+  validateLeadInput,
+  validateLeadFollowInput,
+  createLeadFollow,
+  validateLeadConversion
+} from '../database/leads'
 
 /**
  * 统一响应格式
@@ -1770,5 +1788,442 @@ export const handlers = [
     const operators = (store.profiles || []).map(p => ({ id: p.id, name: p.name }))
 
     return success({ modules, operators })
+  }),
+
+  // ──── 营销活动接口 ────
+
+  // GET /api/marketing/campaigns — 组合查询 + 分页营销活动列表
+  http.get('/api/marketing/campaigns', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:view') && !perms.includes('*')) {
+      return fail('无权限查看营销活动', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = queryMarketingCampaigns(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/marketing/campaigns/options — 营销活动筛选选项
+  http.get('/api/marketing/campaigns/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:view') && !perms.includes('*')) {
+      return fail('无权限查看营销活动', 1006, 403)
+    }
+
+    const store = getStore()
+    const options = getMarketingCampaignOptions(store)
+    return success(options)
+  }),
+
+  // GET /api/marketing/statistics — 营销活动统计概览
+  http.get('/api/marketing/statistics', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:view') && !perms.includes('*')) {
+      return fail('无权限查看营销活动', 1006, 403)
+    }
+
+    const store = getStore()
+    const statistics = getMarketingStatistics(store)
+    return success(statistics)
+  }),
+
+  // GET /api/marketing/analysis — 营销活动 ROI 分析数据
+  http.get('/api/marketing/analysis', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:view') && !perms.includes('*')) {
+      return fail('无权限查看营销活动', 1006, 403)
+    }
+
+    const store = getStore()
+    const data = getMarketingAnalysisData(store)
+    return success(data)
+  }),
+
+  // GET /api/marketing/campaigns/:id — 营销活动详情
+  http.get('/api/marketing/campaigns/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:view') && !perms.includes('*')) {
+      return fail('无权限查看营销活动', 1006, 403)
+    }
+
+    const store = getStore()
+    const detail = getMarketingCampaignDetail(store, params.id)
+    if (!detail) return fail('营销活动不存在', 1005, 404)
+    return success(detail)
+  }),
+
+  // POST /api/marketing/campaigns — 新建营销活动
+  http.post('/api/marketing/campaigns', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:create') && !perms.includes('*')) {
+      return fail('无权限创建营销活动', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    const { valid, errors, data } = validateMarketingCampaignInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    const campaign = {
+      id: crypto.randomUUID(),
+      ...data,
+      ownerId: data.ownerId || user.id,
+      leadCount: 0,
+      convertedLeadCount: 0,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    if (!store.marketingCampaigns) store.marketingCampaigns = []
+    store.marketingCampaigns.unshift(campaign)
+
+    return success(campaign)
+  }),
+
+  // PUT /api/marketing/campaigns/:id — 更新营销活动
+  http.put('/api/marketing/campaigns/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('campaign:edit') && !perms.includes('*')) {
+      return fail('无权限编辑营销活动', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = (store.marketingCampaigns || []).findIndex(c => c.id === params.id)
+    if (idx === -1) return fail('营销活动不存在', 1005, 404)
+
+    const existing = store.marketingCampaigns[idx]
+    const body = await request.json()
+
+    const { valid, errors, data } = validateMarketingCampaignInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    store.marketingCampaigns[idx] = {
+      ...existing,
+      ...data,
+      id: existing.id,
+      ownerId: data.ownerId || existing.ownerId,
+      leadCount: existing.leadCount,
+      convertedLeadCount: existing.convertedLeadCount,
+      createdAt: existing.createdAt,
+      updatedAt: now
+    }
+
+    return success(store.marketingCampaigns[idx])
+  }),
+
+  // ──── 销售线索接口 ────
+
+  // GET /api/leads — 组合查询 + 分页线索列表
+  http.get('/api/leads', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:view') && !perms.includes('*')) {
+      return fail('无权限查看销售线索', 1006, 403)
+    }
+
+    const url = new URL(request.url)
+    const searchParams = Object.fromEntries(url.searchParams.entries())
+    const store = getStore()
+    const result = queryLeads(store, searchParams)
+    return success(result)
+  }),
+
+  // GET /api/leads/options — 线索筛选选项
+  http.get('/api/leads/options', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:view') && !perms.includes('*')) {
+      return fail('无权限查看销售线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const options = getLeadOptions(store)
+    return success(options)
+  }),
+
+  // GET /api/leads/:id — 线索详情
+  http.get('/api/leads/:id', ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:view') && !perms.includes('*')) {
+      return fail('无权限查看销售线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const detail = getLeadDetail(store, params.id)
+    if (!detail) return fail('线索不存在', 1005, 404)
+    return success(detail)
+  }),
+
+  // POST /api/leads — 新建线索
+  http.post('/api/leads', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:create') && !perms.includes('*')) {
+      return fail('无权限创建销售线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    const { valid, errors, data } = validateLeadInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    const lead = {
+      id: crypto.randomUUID(),
+      ...data,
+      status: 'new',
+      campaignId: data.campaignId || null,
+      customerId: null,
+      lastFollowAt: null,
+      convertedAt: null,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    if (!store.leads) store.leads = []
+    store.leads.unshift(lead)
+
+    return success(lead)
+  }),
+
+  // PUT /api/leads/:id — 更新线索
+  http.put('/api/leads/:id', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:edit') && !perms.includes('*')) {
+      return fail('无权限编辑销售线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = (store.leads || []).findIndex(l => l.id === params.id)
+    if (idx === -1) return fail('线索不存在', 1005, 404)
+
+    // sales 只能编辑自己负责的线索
+    if (user.role === 'sales' && store.leads[idx].ownerId !== user.id) {
+      return fail('没有权限编辑他人的线索', 1006, 403)
+    }
+
+    const existing = store.leads[idx]
+    const body = await request.json()
+
+    const { valid, errors, data } = validateLeadInput(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const now = new Date().toISOString()
+    store.leads[idx] = {
+      ...existing,
+      ...data,
+      id: existing.id,
+      ownerId: data.ownerId || existing.ownerId,
+      status: existing.status,
+      campaignId: data.campaignId || existing.campaignId,
+      customerId: existing.customerId,
+      lastFollowAt: existing.lastFollowAt,
+      convertedAt: existing.convertedAt,
+      createdAt: existing.createdAt,
+      updatedAt: now
+    }
+
+    return success(store.leads[idx])
+  }),
+
+  // PATCH /api/leads/assign — 批量分配线索
+  http.patch('/api/leads/assign', async ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:assign') && !perms.includes('*')) {
+      return fail('无权限分配线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const body = await request.json()
+
+    if (!body.leadIds || !Array.isArray(body.leadIds) || body.leadIds.length === 0) {
+      return fail('请选择要分配的线索', 5001, 400)
+    }
+
+    if (!body.ownerId) {
+      return fail('请选择目标负责人', 5002, 400)
+    }
+
+    // 校验负责人
+    const owner = (store.profiles || []).find(p => p.id === body.ownerId && p.status !== 'inactive')
+    if (!owner) {
+      return fail('指定的负责人不存在或已停用', 5003, 400)
+    }
+
+    const now = new Date().toISOString()
+    const updated = []
+
+    for (const leadId of body.leadIds) {
+      const idx = (store.leads || []).findIndex(l => l.id === leadId)
+      if (idx === -1) continue
+
+      if (store.leads[idx].status === 'converted' || store.leads[idx].status === 'closed') {
+        continue
+      }
+
+      store.leads[idx].ownerId = body.ownerId
+      store.leads[idx].updatedAt = now
+      updated.push(store.leads[idx].id)
+    }
+
+    return success({
+      message: `成功分配 ${updated.length} 条线索`,
+      updatedCount: updated.length,
+      ownerId: body.ownerId
+    })
+  }),
+
+  // POST /api/leads/:id/follows — 添加线索跟进记录
+  http.post('/api/leads/:id/follows', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:follow') && !perms.includes('*')) {
+      return fail('没有权限跟进线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = (store.leads || []).findIndex(l => l.id === params.id)
+    if (idx === -1) return fail('线索不存在', 1005, 404)
+
+    // sales 只能跟进自己负责的线索
+    if (user.role === 'sales' && store.leads[idx].ownerId !== user.id) {
+      return fail('没有权限跟进他人的线索', 1006, 403)
+    }
+
+    const body = await request.json()
+
+    const { valid, errors } = validateLeadFollowInput(body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    const lead = store.leads[idx]
+    const { record } = createLeadFollow(lead, body, user.id)
+
+    if (!store.leadFollowRecords) store.leadFollowRecords = []
+    store.leadFollowRecords.push(record)
+
+    return success(record)
+  }),
+
+  // POST /api/leads/:id/convert — 线索转化
+  http.post('/api/leads/:id/convert', async ({ request, params }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const perms = ROLE_PERMISSIONS[user.role] || []
+    if (!perms.includes('lead:convert') && !perms.includes('*')) {
+      return fail('无权限转化线索', 1006, 403)
+    }
+
+    const store = getStore()
+    const idx = (store.leads || []).findIndex(l => l.id === params.id)
+    if (idx === -1) return fail('线索不存在', 1005, 404)
+
+    const lead = store.leads[idx]
+
+    // 已转化或已关闭不可重复转化
+    if (lead.status === 'converted') {
+      return fail('该线索已转化', 1008, 409)
+    }
+    if (lead.status === 'closed') {
+      return fail('已关闭的线索不可转化', 1008, 409)
+    }
+
+    // sales 只能转化自己负责的线索
+    if (user.role === 'sales' && lead.ownerId !== user.id) {
+      return fail('没有权限转化他人的线索', 1006, 403)
+    }
+
+    const body = await request.json()
+
+    // 校验输入
+    const { valid, errors, data } = validateLeadConversion(store, body)
+    if (!valid) {
+      const msg = errors.map(e => e.message).join('；')
+      return fail(msg, errors[0].code, 400)
+    }
+
+    // 执行转化
+    const result = createLeadConversion(store, lead, data, user)
+
+    // 记录操作日志
+    createOperationLogEntry(store, {
+      operatorId: user.id,
+      module: 'customer',
+      action: 'convert',
+      targetType: 'lead',
+      targetId: lead.id,
+      content: `线索转化客户：${lead.name} → ${data.customerName}`,
+      result: 'success'
+    })
+
+    return success({
+      customer: result.customer,
+      lead: {
+        id: lead.id,
+        status: lead.status,
+        customerId: lead.customerId,
+        convertedAt: lead.convertedAt
+      }
+    })
   })
 ]

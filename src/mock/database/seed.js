@@ -30,8 +30,8 @@ export const ROLE_NAMES = {
  */
 export const ROLE_PERMISSIONS = {
   admin:   ['*'],
-  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:edit', 'contract:delete', 'contract:approve', 'contract:attachment', 'ticket:view', 'ticket:create', 'ticket:handle', 'system:user:view', 'system:role:view', 'system:menu:view', 'system:log:view'],
-  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:attachment'],
+  manager: ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:assign', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:edit', 'contract:delete', 'contract:approve', 'contract:attachment', 'ticket:view', 'ticket:create', 'ticket:handle', 'system:user:view', 'system:role:view', 'system:menu:view', 'system:log:view', 'campaign:view', 'campaign:create', 'campaign:edit', 'lead:view', 'lead:create', 'lead:edit', 'lead:assign', 'lead:follow', 'lead:convert'],
+  sales:   ['dashboard:view', 'customer:view', 'customer:create', 'customer:edit', 'customer:delete', 'customer:follow', 'opportunity:view', 'opportunity:create', 'opportunity:edit', 'opportunity:delete', 'opportunity:stage', 'contract:view', 'contract:create', 'contract:attachment', 'campaign:view', 'lead:view', 'lead:create', 'lead:edit', 'lead:follow', 'lead:convert'],
   support: ['dashboard:view', 'customer:view', 'customer:follow', 'ticket:view', 'ticket:handle'],
   viewer:  ['dashboard:view', 'customer:view']
 }
@@ -46,6 +46,9 @@ export const ROLE_MENUS = {
     { path: '/opportunities', title: '商机管理', shortLabel: '机', icon: 'TrendCharts' },
     { path: '/contracts', title: '合同管理', shortLabel: '同', icon: 'Document' },
     { path: '/tickets', title: '工单管理', shortLabel: '单', icon: 'Ticket' },
+    { path: '/marketing/campaigns', title: '营销活动', shortLabel: '营', icon: 'TrendCharts' },
+    { path: '/marketing/analysis', title: '营销分析', shortLabel: '析', icon: 'TrendCharts' },
+    { path: '/leads', title: '销售线索', shortLabel: '线', icon: 'User' },
     {
       path: '/system/users',
       title: '系统管理',
@@ -66,6 +69,9 @@ export const ROLE_MENUS = {
     { path: '/opportunities', title: '商机管理', shortLabel: '机', icon: 'TrendCharts' },
     { path: '/contracts', title: '合同管理', shortLabel: '同', icon: 'Document' },
     { path: '/tickets', title: '工单管理', shortLabel: '单', icon: 'Ticket' },
+    { path: '/marketing/campaigns', title: '营销活动', shortLabel: '营', icon: 'TrendCharts' },
+    { path: '/marketing/analysis', title: '营销分析', shortLabel: '析', icon: 'TrendCharts' },
+    { path: '/leads', title: '销售线索', shortLabel: '线', icon: 'User' },
     { path: '/api-docs', title: '接口文档', shortLabel: '档', icon: 'Document' }
   ],
   sales: [
@@ -73,6 +79,9 @@ export const ROLE_MENUS = {
     { path: '/customers', title: '客户管理', shortLabel: '客', icon: 'User' },
     { path: '/opportunities', title: '商机管理', shortLabel: '机', icon: 'TrendCharts' },
     { path: '/contracts', title: '合同管理', shortLabel: '同', icon: 'Document' },
+    { path: '/marketing/campaigns', title: '营销活动', shortLabel: '营', icon: 'TrendCharts' },
+    { path: '/marketing/analysis', title: '营销分析', shortLabel: '析', icon: 'TrendCharts' },
+    { path: '/leads', title: '销售线索', shortLabel: '线', icon: 'User' },
     { path: '/api-docs', title: '接口文档', shortLabel: '档', icon: 'Document' }
   ],
   support: [

@@ -358,3 +358,53 @@ export function validateFollowRecordInput(input) {
     errors
   }
 }
+
+/**
+ * 创建线索转化客户记录
+ *
+ * 将线索转化为正式客户：在 customers 中创建一条新客户记录，
+ * 同时更新线索的状态为 converted 并关联 customerId。
+ *
+ * @param {Object} database - 完整的数据集（引用，会被修改）
+ * @param {Object} lead - 线索对象（引用，会被修改 status/customerId/convertedAt/updatedAt）
+ * @param {Object} customerData - 从 validateLeadConversion 返回的规范化客户数据
+ * @param {Object} operator - 当前操作用户 { id, name, role }
+ * @returns {{ customer: Object, lead: Object }}
+ */
+export function createLeadConversion(database, lead, customerData, operator) {
+  const now = new Date().toISOString()
+
+  // 1. 创建客户
+  const customer = {
+    id: crypto.randomUUID(),
+    name: customerData.customerName,
+    industry: customerData.industry || '互联网/IT',
+    level: customerData.level || 'regular',
+    status: 'active',
+    ownerId: lead.ownerId || operator.id,
+    province: null,
+    city: null,
+    address: null,
+    source: SOURCES[0] || null,
+    contactName: customerData.contactName || lead.name,
+    contactPhone: customerData.contactPhone || lead.phone,
+    contactTitle: customerData.contactTitle || null,
+    contactEmail: customerData.contactEmail || lead.email,
+    description: customerData.description || `从线索转化：${lead.name}（${lead.company || '无公司'}）`,
+    lastFollowAt: null,
+    createdAt: now,
+    updatedAt: now
+  }
+
+  // 2. 更新线索
+  lead.status = 'converted'
+  lead.customerId = customer.id
+  lead.convertedAt = now
+  lead.updatedAt = now
+
+  // 3. 写入数据库
+  if (!database.customers) database.customers = []
+  database.customers.unshift(customer)
+
+  return { customer, lead }
+}

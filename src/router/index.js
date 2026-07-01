@@ -74,6 +74,36 @@ const routes = [
         component: () => import('@/views/tickets/TicketDetailView.vue')
       },
       {
+        path: 'marketing/campaigns',
+        name: 'MarketingCampaigns',
+        meta: { title: '营销活动', requiresAuth: true, roles: ['admin', 'manager', 'sales'], permission: 'campaign:view' },
+        component: () => import('@/views/marketing/MarketingCampaignListView.vue')
+      },
+      {
+        path: 'marketing/campaigns/:id',
+        name: 'MarketingCampaignDetail',
+        meta: { title: '营销活动详情', requiresAuth: true, roles: ['admin', 'manager', 'sales'], permission: 'campaign:view' },
+        component: () => import('@/views/marketing/MarketingCampaignDetailView.vue')
+      },
+      {
+        path: 'marketing/analysis',
+        name: 'MarketingAnalysis',
+        meta: { title: '营销分析', requiresAuth: true, roles: ['admin', 'manager', 'sales'], permission: 'campaign:view' },
+        component: () => import('@/views/marketing/MarketingAnalysisView.vue')
+      },
+      {
+        path: 'leads',
+        name: 'Leads',
+        meta: { title: '销售线索', requiresAuth: true, roles: ['admin', 'manager', 'sales'], permission: 'lead:view' },
+        component: () => import('@/views/leads/LeadListView.vue')
+      },
+      {
+        path: 'leads/:id',
+        name: 'LeadDetail',
+        meta: { title: '线索详情', requiresAuth: true, roles: ['admin', 'manager', 'sales'], permission: 'lead:view' },
+        component: () => import('@/views/leads/LeadDetailView.vue')
+      },
+      {
         path: 'system/users',
         name: 'SystemUsers',
         meta: { title: '用户管理', requiresAuth: true, roles: ['admin'], permission: 'system:user:view' },

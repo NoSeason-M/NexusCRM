@@ -20,11 +20,13 @@ import {
   generateSystemMenus,
   generateOperationLogs
 } from './system'
+import { generateMarketingCampaigns } from './marketing'
+import { generateLeads, generateLeadFollowRecords } from './leads'
 
 const STORAGE_KEY = 'nexus-crm-mock-data'
 
 /** 数据版本号，用于增量迁移 */
-export const DATABASE_VERSION = 10
+export const DATABASE_VERSION = 12
 
 /**
  * 从 localStorage 加载数据，不存在或不完整则返回 null（触发 reset）
@@ -75,6 +77,13 @@ function reset() {
   const systemUsers = generateSystemUsers(profiles)
   const operationLogs = generateOperationLogs(profiles)
 
+  // 营销活动数据
+  const marketingCampaigns = generateMarketingCampaigns(profiles)
+
+  // 销售线索数据
+  const leads = generateLeads(profiles, marketingCampaigns, customers)
+  const leadFollowRecords = generateLeadFollowRecords(leads, profiles)
+
   // 构建完整数据库用于角色 userCount
   const tempDb = { profiles, systemUsers }
   const systemRoles = generateSystemRoles(tempDb)
@@ -104,7 +113,12 @@ function reset() {
     systemUsers,
     systemRoles,
     systemMenus,
-    operationLogs
+    operationLogs,
+    // 营销活动数据
+    marketingCampaigns,
+    // 销售线索数据
+    leads,
+    leadFollowRecords
   }
   save(data)
   return data
