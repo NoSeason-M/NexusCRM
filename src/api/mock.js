@@ -13,3 +13,10 @@ export function getMockHealth() {
 export function resetMockData() {
   return request.post('/mock/reset')
 }
+
+/**
+ * 获取演示场景数据（包含账号、路由、诊断信息）
+ */
+export function getDemoScenario() {
+  return request.get('/mock/demo-scenario')
+}

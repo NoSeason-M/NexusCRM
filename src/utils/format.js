@@ -1,10 +1,12 @@
 /**
  * 格式化工具
+ *
+ * 所有函数处理 null / undefined / NaN 输入，返回默认值 "-" 或 "0" 等安全值。
  */
 
 /**
  * 格式化数字，加千分位分隔符
- * @param {number} value
+ * @param {number|null|undefined} value
  * @returns {string}
  */
 export function formatNumber(value) {
@@ -14,7 +16,7 @@ export function formatNumber(value) {
 
 /**
  * 格式化金额（人民币，不保留小数）
- * @param {number} value
+ * @param {number|null|undefined} value
  * @returns {string}
  */
 export function formatCurrency(value) {
@@ -28,7 +30,7 @@ export function formatCurrency(value) {
 
 /**
  * 格式化百分比
- * @param {number} value 0~100
+ * @param {number|null|undefined} value 0~100
  * @returns {string}
  */
 export function formatPercent(value) {
@@ -37,8 +39,8 @@ export function formatPercent(value) {
 }
 
 /**
- * 格式化日期
- * @param {string|Date} date
+ * 格式化日期（年月日）
+ * @param {string|Date|null|undefined} date
  * @returns {string}
  */
 export function formatDate(date) {
@@ -50,4 +52,44 @@ export function formatDate(date) {
     month: '2-digit',
     day: '2-digit'
   }).format(d)
+}
+
+/**
+ * 格式化日期时间（年月日 时分）
+ * @param {string|Date|null|undefined} date
+ * @returns {string}
+ */
+export function formatDateTime(date) {
+  if (!date) return '-'
+  const d = new Date(date)
+  if (Number.isNaN(d.getTime())) return '-'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d)
+}
+
+/**
+ * 格式化 ISO 日期字符串为指定样式
+ * @param {string|Date|null|undefined} date
+ * @param {'date'|'datetime'} style
+ * @returns {string}
+ */
+export function formatDateStyle(date, style = 'date') {
+  if (!date) return '-'
+  const d = new Date(date)
+  if (Number.isNaN(d.getTime())) return '-'
+  const options = {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }
+  if (style === 'datetime') {
+    options.hour = '2-digit'
+    options.minute = '2-digit'
+  }
+  return new Intl.DateTimeFormat('zh-CN', options).format(d)
 }

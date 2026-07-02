@@ -155,6 +155,87 @@ export const handlers = [
     return fail('模拟服务器内部错误', -1, 500)
   }),
 
+  // GET /api/mock/demo-scenario — 演示场景数据
+  http.get('/api/mock/demo-scenario', ({ request }) => {
+    const user = resolveUser(request.headers.get('Authorization'))
+    if (!user) return fail('未登录或 Token 已过期', 1004, 401)
+
+    const store = getStore()
+
+    // 为每个角色生成可用的 Token
+    const accounts = {}
+    store.accounts.forEach(a => {
+      accounts[a.role] = btoa(JSON.stringify({ username: a.username, role: a.role, timestamp: Date.now() }))
+    })
+
+    // 提取各业务模块的实体 ID
+    const marketing = {}
+    if (store.marketingCampaigns?.length > 0) {
+      marketing.campaignId = store.marketingCampaigns[0].id
+    }
+    if (store.leads?.length > 0) {
+      // 选一个未转化的线索
+      const unconverted = store.leads.find(l => l.status !== 'converted' && l.status !== 'closed')
+      marketing.leadId = unconverted?.id || store.leads[0].id
+    }
+
+    const sales = {}
+    if (store.customers?.length > 0) {
+      sales.customerId = store.customers[0].id
+    }
+    if (store.opportunities?.length > 0) {
+      sales.opportunityId = store.opportunities[0].id
+    }
+    if (store.contracts?.length > 0) {
+      sales.contractId = store.contracts[0].id
+    }
+
+    const service = {}
+    if (store.customers?.length > 1) {
+      service.customerId = store.customers[1].id
+    }
+    if (store.tickets?.length > 0) {
+      service.ticketId = store.tickets[0].id
+    }
+
+    // 诊断信息：数据量统计 & 外键一致性检查
+    const diagnostics = {
+      counts: {
+        accounts: store.accounts?.length || 0,
+        profiles: store.profiles?.length || 0,
+        customers: store.customers?.length || 0,
+        opportunities: store.opportunities?.length || 0,
+        contracts: store.contracts?.length || 0,
+        tickets: store.tickets?.length || 0,
+        leads: store.leads?.length || 0,
+        marketingCampaigns: store.marketingCampaigns?.length || 0
+      },
+      references: {
+        // 客户 ownerId 有效性
+        customersWithoutOwner: (store.customers || []).filter(c => c.ownerId && !store.profiles.find(p => p.id === c.ownerId)).length,
+        // 商机 customerId 有效性
+        opportunitiesWithoutCustomer: (store.opportunities || []).filter(o => o.customerId && !store.customers.find(c => c.id === o.customerId)).length,
+        // 合同 customerId 有效性
+        contractsWithoutCustomer: (store.contracts || []).filter(c => c.customerId && !store.customers.find(cu => cu.id === c.customerId)).length,
+        // 线索 customerId 有效性
+        leadsInvalidCustomer: (store.leads || []).filter(l => l.customerId && !store.customers.find(c => c.id === l.customerId)).length,
+        // 工单 assigneeId 有效性
+        ticketsInvalidAssignee: (store.tickets || []).filter(t => t.assigneeId && !store.profiles.find(p => p.id === t.assigneeId)).length
+      },
+      version: store.version,
+      seed: 2026
+    }
+
+    return success({ accounts, routes: { marketing, sales, service }, diagnostics })
+  }),
+
+  // ──── 延迟场景辅助函数 ────
+  // 在 url.searchParams 中传 ?delay=3000 可使响应延迟指定毫秒
+  // 用于测试 loading 状态
+
+  // 所有需要 delay 支持的端点都在其 handler 中调用此模式:
+  // const url = new URL(request.url); const delay = parseInt(url.searchParams.get('delay'), 10); if (delay > 0) await new Promise(r => setTimeout(r, delay))
+
   // ──── 认证接口 ────
 
   // POST /api/auth/login — 登录
